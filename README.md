@@ -18,6 +18,10 @@ HP·방어구·사망·K/D·팀 점수는 모든 클라이언트에 복제하고
 
 프로젝트를 UE 5.7에서 빌드한 뒤 `FPSBaseline` 맵을 실행한다. 에디터의 플레이 설정에서 Net Mode를 `Play As Client`, Number of Players를 2 이상으로 설정하면 Dedicated Server를 기준으로 플레이할 수 있다. 입력 포커스를 원하는 게임 창에 맞춘다.
 
+프로젝트 기본 PIE 설정은 `Play As Client`, 플레이어 2명, `New Editor Window (PIE)`다. 기존에 프로젝트를 열었던 에디터에서는 `Saved/Config`의 개인 설정이 기본값보다 우선하므로 플레이 버튼 옆 메뉴의 Multiplayer Options에서 Net Mode를 한 번 변경해야 한다. 실행 중인 플레이를 중지한 뒤 설정을 바꾸고 다시 실행한다.
+
+두 창 제목이 모두 `NetMode: Standalone`이고 각 플레이어 목록에 한 명만 표시되면 두 개의 독립 게임을 실행한 상태다. 창 수를 2로 설정하는 것만으로는 같은 서버에 연결되지 않는다. `Play As Client`로 실행하면 두 창이 `Client`로 표시되고, 각 목록에 Red와 Blue 플레이어가 함께 나타난다. 상대는 팀 색상의 원통형 기본 캐릭터로 표시된다.
+
 PowerShell에서 별도 서버 프로세스와 클라이언트 창 2개를 띄우려면 프로젝트 루트에서 실행한다.
 
 ```powershell

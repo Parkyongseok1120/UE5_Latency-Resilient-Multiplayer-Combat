@@ -40,7 +40,7 @@ public:
 	TArray<ALatencyMultiCombatPlayerState*> GetTeamMembers(ETeamSide Team) const;
 
 	// --- Score Management (FORCEINLINE: small, called per kill) ---
-	FORCEINLINE void AddKillToTeam(ETeamSide Team) { if (bMatchEnded) return; if (Team == ETeamSide::Red) RedTeamScore++; else if (Team == ETeamSide::Blue) BlueTeamScore++; }
+	FORCEINLINE void AddKillToTeam(ETeamSide Team) { if (!HasAuthority() || bMatchEnded) return; if (Team == ETeamSide::Red) RedTeamScore++; else if (Team == ETeamSide::Blue) BlueTeamScore++; ForceNetUpdate(); }
 	FORCEINLINE bool CheckWinCondition() const { return bMatchEnded || RedTeamScore >= ScoreToWin || BlueTeamScore >= ScoreToWin; }
 	void EndMatch(ETeamSide Winner);
 
@@ -51,7 +51,4 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-private:
-	// Track players per team for quick lookup
-	TMap<ETeamSide, TArray<ALatencyMultiCombatPlayerState*>> TeamMembers;
 };

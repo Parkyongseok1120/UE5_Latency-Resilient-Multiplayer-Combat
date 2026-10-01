@@ -6,6 +6,8 @@
 #include "Data/CombatTypes.h"
 #include "UCharacterDataAsset.generated.h"
 
+class UWeaponDataAsset;
+
 UCLASS()
 class LATENCY_MULTICOMBAT_API UCharacterDataAsset : public UPrimaryDataAsset
 {

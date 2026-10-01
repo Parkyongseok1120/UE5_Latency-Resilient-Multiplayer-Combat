@@ -1,6 +1,6 @@
 // Latency_MultiCombat - Game State Implementation
-#include "Net/UnrealNetwork.h"
 #include "LatencyMultiCombatGameState.h"
+#include "Net/UnrealNetwork.h"
 #include "LatencyMultiCombatPlayerState.h"
 
 ALatencyMultiCombatGameState::ALatencyMultiCombatGameState()
@@ -33,28 +33,32 @@ void ALatencyMultiCombatGameState::OnRep_TeamScores()
 
 void ALatencyMultiCombatGameState::AddPlayerToTeam(ALatencyMultiCombatPlayerState* PlayerState, ETeamSide Team)
 {
-	if (!PlayerState) return;
+	if (!HasAuthority() || !PlayerState) return;
 
 	PlayerState->SetTeam(Team);
-	TeamMembers.FindOrAdd(Team).AddUnique(PlayerState);
 }
 
 int32 ALatencyMultiCombatGameState::GetTeamMemberCount(ETeamSide Team) const
 {
-	const TArray<ALatencyMultiCombatPlayerState*>* Members = TeamMembers.Find(Team);
-	return Members ? Members->Num() : 0;
+	return GetTeamMembers(Team).Num();
 }
 
 TArray<ALatencyMultiCombatPlayerState*> ALatencyMultiCombatGameState::GetTeamMembers(ETeamSide Team) const
 {
-	const TArray<ALatencyMultiCombatPlayerState*>* Members = TeamMembers.Find(Team);
-	return Members ? *Members : TArray<ALatencyMultiCombatPlayerState*>();
+	TArray<ALatencyMultiCombatPlayerState*> Members;
+	// PlayerArray is maintained by the engine on both server and clients, including disconnects.
+	for (APlayerState* Player : PlayerArray)
+		if (auto* PS = Cast<ALatencyMultiCombatPlayerState>(Player))
+			if (IsValid(PS) && !PS->IsInactive() && PS->Team == Team) Members.Add(PS);
+	return Members;
 }
 
 // AddKillToTeam and CheckWinCondition are FORCEINLINE in header
 
 void ALatencyMultiCombatGameState::EndMatch(ETeamSide Winner)
 {
+	if (!HasAuthority() || bMatchEnded) return;
 	bMatchEnded = true;
 	WinningTeam = Winner;
+	ForceNetUpdate();
 }

@@ -16,13 +16,27 @@ public:
 	ALatencyMultiCombatPlayerController();
 
 	// Input Mapping Context - assign in Blueprint subclass or Default__ asset
-	// This is the ONLY input setup needed in C++. All key→action mappings live in this editor asset.
+	// Optional mapping context for a complete set of character Enhanced Input actions.
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TSoftObjectPtr<UInputMappingContext> CombatMappingContext;
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaTime) override;
 
 protected:
 	// Enable the mapping context on spawn
 	void SetupEnhancedInput();
+
+private:
+#if !UE_BUILD_SHIPPING
+	// Opt-in client automation uses the same gameplay RPCs as mouse input.
+	void TickBaselineSmoke();
+	bool bSmokeEnabled = false;
+	bool bSmokeShooter = false;
+	bool bSmokeSawDamage = false;
+	bool bSmokeSawDeath = false;
+	bool bSmokeFinished = false;
+	float SmokeStartTime = 0.f;
+	float SmokeLastHealth = -1.f;
+#endif
 };

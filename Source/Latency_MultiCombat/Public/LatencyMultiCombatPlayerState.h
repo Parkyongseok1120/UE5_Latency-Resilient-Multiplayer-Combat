@@ -51,9 +51,10 @@ public:
 	void OnRep_Health();
 
 	// --- Game Logic (FORCEINLINE: small, hot-path) ---
-	FORCEINLINE void AddKill() { KillCount++; }
-	FORCEINLINE void AddDeath() { DeathCount++; bIsDead = true; }
-	FORCEINLINE void SetTeam(ETeamSide NewTeam) { Team = NewTeam; }
+	FORCEINLINE void AddKill() { if (HasAuthority()) { KillCount++; ForceNetUpdate(); } }
+	FORCEINLINE void AddDeath() { if (HasAuthority() && !bIsDead) { DeathCount++; bIsDead = true; ForceNetUpdate(); } }
+	FORCEINLINE void SetTeam(ETeamSide NewTeam) { if (HasAuthority()) { Team = NewTeam; ForceNetUpdate(); } }
+	void InitializeForSpawn(const FCharacterStats& Stats);
 	void ApplyDamage(float Amount, AController* Damager);
 	void Heal(float Amount);
 	void ResetForRespawn();

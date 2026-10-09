@@ -7,10 +7,12 @@
 #include "InputMappingContext.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "CombatBenchmarkComponent.h"
 
 ALatencyMultiCombatPlayerController::ALatencyMultiCombatPlayerController()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	Benchmark = CreateDefaultSubobject<UCombatBenchmarkComponent>(TEXT("CombatBenchmark"));
 }
 
 void ALatencyMultiCombatPlayerController::BeginPlay()

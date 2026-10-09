@@ -26,7 +26,9 @@ public:
 	TSubclassOf<ACharacter> DefaultCharacterClass;
 
 	virtual void BeginPlay() override;
+	virtual FString InitNewPlayer(APlayerController* NewPlayer, const FUniqueNetIdRepl& UniqueId, const FString& Options, const FString& Portal) override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;
+	virtual bool ShouldSpawnAtStartSpot(AController* Player) override;
 	virtual void Logout(AController* Exiting) override;
 	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 	virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
@@ -40,5 +42,6 @@ protected:
 	ALatencyMultiCombatGameState* GetDMGameState() const;
 
 private:
+	void AssignPlayerTeam(APlayerController* Player);
 	TMap<TWeakObjectPtr<AController>, FTimerHandle> RespawnTimers;
 };

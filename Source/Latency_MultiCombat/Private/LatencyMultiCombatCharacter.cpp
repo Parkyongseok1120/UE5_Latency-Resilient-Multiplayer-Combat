@@ -190,22 +190,24 @@ void ALatencyMultiCombatCharacter::FireWeapon()
 	if (!CanFire()) return;
 	if (HasAuthority())
 	{
-		HandleServerFire(GetBaseAimRotation());
+		HandleServerFire(GetBaseAimRotation(), ++NextShotId);
 		return;
 	}
 	if (!IsLocallyControlled()) return;
 	const float Now = GetWorld()->GetTimeSeconds();
 	if (Now - LastLocalFireTime < 1.f / WeaponStats.FireRate) return;
 	LastLocalFireTime = Now;
-	ServerFire(GetBaseAimRotation());
+	const uint32 ShotId = ++NextShotId;
+	OnShotSubmitted.Broadcast(ShotId);
+	ServerFire(GetBaseAimRotation(), ShotId);
 }
 
-void ALatencyMultiCombatCharacter::ServerFire_Implementation(FRotator AimRotation)
+void ALatencyMultiCombatCharacter::ServerFire_Implementation(FRotator AimRotation, uint32 ShotId)
 {
-	HandleServerFire(AimRotation);
+	HandleServerFire(AimRotation, ShotId);
 }
 
-void ALatencyMultiCombatCharacter::HandleServerFire(const FRotator& AimRotation)
+void ALatencyMultiCombatCharacter::HandleServerFire(const FRotator& AimRotation, uint32 ShotId)
 {
 	if (!HasAuthority() || !CanFire() || AimRotation.ContainsNaN()) return;
 	const float Now = GetWorld()->GetTimeSeconds();
@@ -225,6 +227,7 @@ void ALatencyMultiCombatCharacter::HandleServerFire(const FRotator& AimRotation)
 	FHitResult Hit;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(BaselineWeaponTrace), false, this);
 	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
+	bool bDamagedPlayer = false;
 	if (bHit && Hit.GetActor())
 	{
 		// Weapon range/falloff are authored in meters; Unreal traces use centimeters.
@@ -233,9 +236,10 @@ void ALatencyMultiCombatCharacter::HandleServerFire(const FRotator& AimRotation)
 			/ FMath::Max(0.01f, WeaponStats.RangeFalloffEnd - WeaponStats.RangeFalloffStart), 0.f, 1.f);
 		const float Damage = WeaponStats.Damage * FMath::Lerp(1.f, WeaponStats.MinDamageRatio, Falloff);
 		const float Applied = UGameplayStatics::ApplyPointDamage(Hit.GetActor(), Damage, Direction, Hit, Controller, this, nullptr);
-		if (Applied > 0.f && Cast<ALatencyMultiCombatCharacter>(Hit.GetActor())) ClientConfirmHit();
+		bDamagedPlayer = Applied > 0.f && Cast<ALatencyMultiCombatCharacter>(Hit.GetActor());
+		if (bDamagedPlayer) ClientConfirmHit(ShotId);
 	}
-	MulticastShot(Start, bHit ? Hit.ImpactPoint : End, bHit);
+	MulticastShot(Start, bHit ? Hit.ImpactPoint : End, bHit, ShotId, bDamagedPlayer);
 	ForceNetUpdate();
 	if (MagazineAmmo == 0) StartReload();
 }
@@ -333,18 +337,20 @@ void ALatencyMultiCombatCharacter::OnRep_CombatState()
 	}
 }
 
-void ALatencyMultiCombatCharacter::MulticastShot_Implementation(FVector_NetQuantize Start, FVector_NetQuantize End, bool bHit)
+void ALatencyMultiCombatCharacter::MulticastShot_Implementation(FVector_NetQuantize Start, FVector_NetQuantize End, bool bHit, uint32 ShotId, bool bDamagedPlayer)
 {
 	if (GetNetMode() == NM_DedicatedServer) return;
+	if (IsLocallyControlled()) OnShotFeedback.Broadcast(ShotId, bDamagedPlayer);
 	DrawDebugLine(GetWorld(), Start, End, FColor::Yellow, false, 0.08f, 0, 1.f);
 	if (bHit) DrawDebugPoint(GetWorld(), End, 8.f, FColor::Orange, false, 0.15f);
 	if (CurrentWeapon && !CurrentWeapon->FireSound.IsNull())
 		UGameplayStatics::PlaySoundAtLocation(this, CurrentWeapon->FireSound.LoadSynchronous(), Start);
 }
 
-void ALatencyMultiCombatCharacter::ClientConfirmHit_Implementation()
+void ALatencyMultiCombatCharacter::ClientConfirmHit_Implementation(uint32 ShotId)
 {
 	LastHitConfirmationTime = GetWorld()->GetTimeSeconds();
+	OnHitConfirmed.Broadcast(ShotId);
 }
 
 void ALatencyMultiCombatCharacter::ApplyCharacterStats()

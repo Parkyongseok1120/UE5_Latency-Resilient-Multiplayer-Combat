@@ -10,7 +10,7 @@ UE 5.7의 서버 권위 FPS 팀 데스매치 Baseline을 구현했다. 기본 �
 - 조준점, 서버 명중 확인 표시, HP·방어구·탄약·K/D·팀 점수 HUD.
 - 균형 팀 배정, 팀별 스폰, 사망 시 이동·발사 차단, 기본 3초 후 리스폰, 기본 50킬 승리.
 
-발사 입력은 Character의 `ServerFire(AimRotation)`로 전달한다. 서버가 발사 속도·탄약·재장전·사망·경기 종료 상태를 검사하고, 서버의 카메라 위치에서 hitscan을 수행한다. 클라이언트는 피해량·발사 위치·명중 대상을 전달하지 않는다. 서버가 데이터 에셋의 피해량과 미터 단위 거리 감쇠를 계산해 HP와 방어구를 변경한다. 같은 팀에 대한 피해는 기본적으로 비활성화되어 있다.
+발사 입력은 Character의 `ServerFire(AimRotation, ShotId)`로 전달한다. `ShotId`는 계측 응답을 연결한다. 서버가 발사 속도·탄약·재장전·사망·경기 종료 상태를 검사하고, 서버의 카메라 위치에서 hitscan을 수행한다. 클라이언트는 피해량·발사 위치·명중 대상을 전달하지 않는다. 서버가 데이터 에셋의 피해량과 미터 단위 거리 감쇠를 계산해 HP와 방어구를 변경한다. 같은 팀에 대한 피해는 기본적으로 비활성화되어 있다.
 
 HP·방어구·사망·K/D·팀 점수는 모든 클라이언트에 복제하고, 탄약은 무기 소유 클라이언트에 복제한다. 사격 표시와 명중 확인은 서버가 승인한 뒤 전달된다. 전투의 Prediction/Reconciliation과 Lag Compensation은 후속 단계이며, 이동은 기본 `CharacterMovement`의 네트워크 처리를 사용한다.
 
@@ -25,10 +25,10 @@ HP·방어구·사망·K/D·팀 점수는 모든 클라이언트에 복제하고
 PowerShell에서 별도 서버 프로세스와 클라이언트 창 2개를 띄우려면 프로젝트 루트에서 실행한다.
 
 ```powershell
-.\Scripts\Start-FPSBaseline.ps1 -LatencyMs 100 -ShowWindows
+.\Tools\Start-FPSBaseline.ps1 -LatencyMs 100 -ShowWindows
 ```
 
-스크립트가 시작한 두 클라이언트를 닫으면 해당 서버도 종료된다. `-EngineRoot`로 엔진 경로를, `-Port`로 기본 7777 포트를 변경할 수 있다. Launcher 엔진에서도 `UnrealEditor.exe -server`를 사용한 독립 Dedicated Server 프로세스로 테스트한다. 배포용 Server 바이너리 패키징은 이 스크립트의 범위에 포함되지 않는다.
+스크립트가 시작한 두 클라이언트를 닫으면 해당 서버도 종료된다. `-EngineRoot`로 엔진 경로를, `-Port`로 기본 18777 포트를 변경할 수 있다. Launcher 엔진에서도 `UnrealEditor.exe -server`를 사용한 독립 Dedicated Server 프로세스로 테스트한다. 배포용 Server 바이너리 패키징은 이 스크립트의 범위에 포함되지 않는다.
 
 ## 자동 검증과 지연 실험
 
@@ -36,20 +36,36 @@ PowerShell에서 별도 서버 프로세스와 클라이언트 창 2개를 띄�
 
 ```powershell
 # 단일 조건
-.\Scripts\Start-FPSBaseline.ps1 -LatencyMs 100 -SmokeTest
+.\Tools\Start-FPSBaseline.ps1 -LatencyMs 100 -SmokeTest
 
 # 보고서의 다섯 조건
-.\Scripts\Test-FPSLatencySuite.ps1
+0, 50, 100, 150, 200 | ForEach-Object { .\Tools\Start-FPSBaseline.ps1 -LatencyMs $_ -SmokeTest }
 ```
 
 지연 값은 양쪽 프로세스의 **송신 패킷당 추가 지연**이다. `-LatencyMs 100`은 서버→클라이언트 100ms, 클라이언트→서버 100ms를 추가하므로 왕복 지연은 대략 200ms 증가한다. 실제 핑에는 엔진 틱과 로컬 처리 시간도 포함된다. 패킷 손실과 지연 편차는 0으로 고정했다. 설정 기준은 [Epic Games 네트워크 에뮬레이션 문서](https://dev.epicgames.com/documentation/ko-kr/unreal-engine/using-network-emulation-in-unreal-engine?application_version=5.7)와 UE 5.7의 `FPacketSimulationSettings`이다.
 
-각 실행의 `Server.log`, `Shooter.log`, `Observer.log`는 `Saved/FPSBaseline/<실행시각>-<지연>ms/`에 저장한다. 전체 조건 스크립트는 `Saved/FPSBaseline/LatencyResults.csv`도 생성한다. 이 검사는 결과 일치와 재진입을 확인하는 기능 테스트이며, 입력 지연의 정량 측정이나 이동 표적 명중률 비교는 별도 실험으로 진행한다.
+각 실행의 `Server.log`, `Shooter.log`, `Observer.log`는 `Saved/FPSBaseline/<실행시각>-<지연>ms-<실행종류>/`에 저장한다. SmokeTest는 결과 일치와 재진입을 확인하는 기능 테스트다. 아래 Benchmark는 발사별 응답 시간도 기록한다.
 
-Unreal Automation의 `LatencyCombat.Baseline`에는 서버 발사 간격, 초기 hitscan 피해, 조기 재장전 완료 차단, 탄약 이전, 클라이언트 상태 변경 차단, 중복 사망과 동시 리스폰 검증이 포함되어 있다. 에디터 Session Frontend에서 실행하거나 다음 명령으로 실행한다.
+## 4주차 검증 / 정량 측정 / 예측 설계
+
+최신 커밋 `9f57b3f` 기준으로 `InitNewPlayer`에서 스폰 위치를 저장하기 전에 팀을 배정하고, 리스폰마다 팀과 자리 점유 상태를 다시 검사하도록 수정했다. Development 전용 `-FPSBaselineBenchmark`는 이동·점프·재장전·사망 중 발사 차단·점수·리스폰을 실제 게임 호출로 검증하고, 발사 식별자를 사용해 서버 효과 응답, 명중 확인, 상대 HP 반영 시간을 같은 클라이언트의 단조 시계로 측정한다. 리스폰 후에도 상대를 중앙선에 정렬하고 발사별 거리를 기록한다. 재현 도구는 저장소에 포함하는 `Tools/`에 둔다.
 
 ```powershell
-& 'C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe' .\Latency_MultiCombat.uproject -unattended -nullrhi -nosplash -NoSound '-ExecCmds=Automation RunTests LatencyCombat.Baseline' '-TestExit=Automation Test Queue Empty'
+# 다섯 지연 조건 × 3회 × 24개 표본 = 360개 발사
+.\Tools\Measure-FPSBaseline.ps1
+
+# GPU로 양쪽 상대 표시를 확인하고 캡처
+.\Tools\Start-FPSBaseline.ps1 -LatencyMs 100 -Benchmark -CaptureFrames -ShowWindows
+```
+
+원시 표본·실행별 결과·평균/P50/P95는 `Saved/FPSBaseline/Measurements/<시각>/`의 CSV에 저장한다. 전체 발사에는 miss도 포함하며, HP/명중 확인 지연은 hit만 집계한다. 정지한 상대와 기본 spread 조건의 명중률을 기록하므로 이동 표적의 Lag Compensation 성능을 의미하지 않는다. 헤드리스 계측은 렌더링·물리 입력 지연을 측정하지 않는다.
+
+실행 조건과 수동 체크 항목은 [검증 문서](Docs/FPSBaselineValidation.md), 이번 실행 수치는 [측정 결과](Docs/FPSBaselineResults.md), 후속 공격 Prediction/Reconciliation의 범위와 승인·보정 흐름은 [설계 문서](Docs/CombatPredictionDesign.md)에 정리했다. 공격 예측 자체는 아직 적용하지 않았다.
+
+Unreal Automation의 `LatencyCombat`에는 서버 발사 간격, 초기 hitscan 피해, 조기 재장전 완료 차단, 탄약 이전, 클라이언트 상태 변경 차단, 중복 사망, 동시 리스폰, 엄폐/아군 피해 차단, 초기 팀 스폰과 측정 응답 대응 검증이 포함되어 있다. 에디터 Session Frontend에서 실행하거나 다음 명령으로 실행한다.
+
+```powershell
+& 'C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe' "$PWD\Latency_MultiCombat.uproject" -unattended -nullrhi -nosplash -NoSound '-ExecCmds=Automation RunTests LatencyCombat' '-TestExit=Automation Test Queue Empty'
 ```
 
 새 테스트 맵을 생성해야 하는 체크아웃에서는 다음 명령을 사용할 수 있다. 이미 존재하는 `FPSBaseline` 맵은 덮어쓰지 않는다.

@@ -1,0 +1,82 @@
+param(
+    [ValidateSet(0, 50, 100, 150, 200)][int]$LatencyMs = 0,
+    [string]$EngineRoot = 'C:\Program Files\Epic Games\UE_5.7',
+    [ValidateRange(1024, 65535)][int]$Port = 18777,
+    [switch]$SmokeTest,
+    [switch]$Benchmark,
+    [ValidateRange(8, 60)][int]$Samples = 24,
+    [switch]$CaptureFrames,
+    [switch]$ShowWindows
+)
+$ErrorActionPreference = 'Stop'
+$projectRoot = Split-Path $PSScriptRoot -Parent
+$projectFile = Join-Path $projectRoot 'Latency_MultiCombat.uproject'
+$editor = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor.exe'
+if (!(Test-Path -LiteralPath $editor)) { throw "UE executable missing: $editor" }
+if (!(Test-Path -LiteralPath (Join-Path $projectRoot 'Content\Level\FPSBaseline.umap'))) { throw 'Generate FPSBaseline.umap first.' }
+if ($SmokeTest -and ($Benchmark -or $ShowWindows -or $CaptureFrames)) { throw 'SmokeTest cannot be combined with Benchmark, ShowWindows or CaptureFrames.' }
+if ($CaptureFrames -and !$Benchmark) { throw 'CaptureFrames requires Benchmark.' }
+$mode = if ($Benchmark) { 'benchmark' } elseif ($SmokeTest) { 'smoke' } else { 'play' }
+$runName = '{0}-{1}ms-{2}' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'), $LatencyMs, $mode
+$logDirectory = Join-Path $projectRoot "Saved\FPSBaseline\$runName"
+New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+$serverLog = Join-Path $logDirectory 'Server.log'
+$shooterLog = Join-Path $logDirectory 'Shooter.log'
+$observerLog = Join-Path $logDirectory 'Observer.log'
+$processes = @()
+try {
+    # Each sender delays outgoing packets: expected added RTT is approximately 2 * LatencyMs.
+    $baseArgs = @(('"' + $projectFile + '"'), '-unattended', '-nosplash', '-NoSound', "-PktLag=$LatencyMs", '-PktLagVariance=0', '-PktLoss=0', '-ExecCmds="t.MaxFPS 60"')
+    $serverArgs = $baseArgs + @('/Game/Level/FPSBaseline', '-server', '-nullrhi', "-port=$Port", ('-abslog="' + $serverLog + '"'))
+    $server = Start-Process -FilePath $editor -ArgumentList $serverArgs -WindowStyle Hidden -PassThru
+    $processes += $server
+    $deadline = (Get-Date).AddSeconds(60)
+    while (!(Test-Path -LiteralPath $serverLog) -or !(Select-String -LiteralPath $serverLog -Pattern 'IpNetDriver listening on port' -Quiet)) {
+        if ($server.HasExited) { throw "Server exited. Inspect $serverLog" }
+        if ((Get-Date) -gt $deadline) { throw "Server startup timed out. Inspect $serverLog" }
+        Start-Sleep -Milliseconds 250
+    }
+    $clientArgs = $baseArgs + @("127.0.0.1:$Port", '-game')
+    $windowStyle = if ($ShowWindows) { 'Normal' } else { 'Hidden' }
+    if ($SmokeTest -or ($Benchmark -and !$ShowWindows -and !$CaptureFrames)) { $clientArgs += '-nullrhi' }
+    else { $clientArgs += @('-windowed', '-ResX=960', '-ResY=540') }
+    if ($SmokeTest) { $clientArgs += '-FPSBaselineSmoke' }
+    if ($Benchmark) { $clientArgs += @('-FPSBaselineBenchmark', "-FPSBenchmarkSamples=$Samples") }
+    if ($CaptureFrames) { $clientArgs += '-FPSBenchmarkCapture' }
+    $shooterArgs = $clientArgs + @(('-abslog="' + $shooterLog + '"'))
+    if ($SmokeTest -or $Benchmark) { $shooterArgs += '-FPSBaselineShooter' }
+    $shooter = Start-Process -FilePath $editor -ArgumentList $shooterArgs -WindowStyle $windowStyle -PassThru
+    $processes += $shooter
+    # First connection receives Red; start Blue after the server accepts Red.
+    $deadline = (Get-Date).AddSeconds(60)
+    while (!(Select-String -LiteralPath $serverLog -Pattern 'Join succeeded' -Quiet)) {
+        if ($shooter.HasExited) { throw "First client exited. Inspect $shooterLog" }
+        if ((Get-Date) -gt $deadline) { throw 'First client connection timed out.' }
+        Start-Sleep -Milliseconds 250
+    }
+    $observer = Start-Process -FilePath $editor -ArgumentList ($clientArgs + @(('-abslog="' + $observerLog + '"'))) -WindowStyle $windowStyle -PassThru
+    $processes += $observer
+    Write-Host "[$mode $LatencyMs ms] Server $($server.Id), clients $($shooter.Id), $($observer.Id). Logs: $logDirectory"
+    if (!$SmokeTest -and !$Benchmark) {
+        Write-Host 'Close both clients when finished; this script will then stop its server.'
+        Wait-Process -Id $shooter.Id, $observer.Id
+        return
+    }
+    $deadline = (Get-Date).AddSeconds($(if ($Benchmark) { 180 } else { 75 }))
+    while (!$shooter.HasExited -or !$observer.HasExited) {
+        if ((Get-Date) -gt $deadline) { throw "$mode timed out. Inspect $logDirectory" }
+        Start-Sleep -Milliseconds 250
+    }
+    $tag = if ($Benchmark) { 'FPSBaselineBenchmark' } else { 'FPSBaselineSmoke' }
+    foreach ($log in @($shooterLog, $observerLog)) {
+        if (!(Select-String -LiteralPath $log -Pattern "\[$tag\] PASS" -Quiet)) { throw "$mode did not pass: $log" }
+        if (Select-String -LiteralPath $log -Pattern "\[$tag\] FAIL|Fatal error:|Assertion failed:" -Quiet) { throw "$mode failed: $log" }
+    }
+    [pscustomobject]@{ LatencyMs = $LatencyMs; AddedRttMs = 2 * $LatencyMs; Result = 'PASS'; Logs = $logDirectory }
+}
+finally {
+    # Terminate only processes launched by this invocation.
+    foreach ($process in $processes) {
+        if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+    }
+}

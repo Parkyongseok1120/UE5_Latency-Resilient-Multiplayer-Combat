@@ -10,6 +10,8 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Engine/DamageEvents.h"
+#include "Engine/LocalPlayer.h"
+#include "Components/BoxComponent.h"
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -144,6 +146,82 @@ bool FFPSBaselineRespawnTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Red health reset"), RedPC->GetPlayerState<ALatencyMultiCombatPlayerState>()->CurrentHealth, 100.f);
 	TestEqual(TEXT("Blue health reset"), BluePC->GetPlayerState<ALatencyMultiCombatPlayerState>()->CurrentHealth, 100.f);
 	TestEqual(TEXT("Repeated death counted once"), RedPC->GetPlayerState<ALatencyMultiCombatPlayerState>()->DeathCount, 1);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSCoverTest, "LatencyCombat.Baseline.CoverAndFriendlyFire",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFPSCoverTest::RunTest(const FString& Parameters)
+{
+	FFPSBaselineTestWorld Fixture;
+	auto* ShooterPC = Fixture.SpawnPlayer(FVector(0, 0, 300), ETeamSide::Red);
+	auto* TargetPC = Fixture.SpawnPlayer(FVector(1000, 0, 300), ETeamSide::Red);
+	auto* Shooter = Cast<ALatencyMultiCombatCharacter>(ShooterPC->GetPawn());
+	auto* TargetPS = TargetPC->GetPlayerState<ALatencyMultiCombatPlayerState>();
+	ShooterPC->SetControlRotation(FRotator::ZeroRotator);
+	Shooter->FireWeapon();
+	TestEqual(TEXT("Friendly fire blocked"), TargetPS->CurrentHealth, 100.f);
+	Fixture.Advance(0.2f);
+	TargetPS->SetTeam(ETeamSide::Blue);
+	auto* Cover = Fixture.World->SpawnActor<AActor>();
+	auto* Box = NewObject<UBoxComponent>(Cover);
+	Cover->SetRootComponent(Box);
+	Box->SetBoxExtent(FVector(50, 200, 200));
+	Box->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Box->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Box->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+	Box->RegisterComponent();
+	Cover->SetActorLocation(FVector(500, 0, 350));
+	Shooter->FireWeapon();
+	TestEqual(TEXT("Cover prevents damage"), TargetPS->CurrentHealth, 100.f);
+	Cover->Destroy();
+	Fixture.Advance(0.2f);
+	Shooter->FireWeapon();
+	TestTrue(TEXT("Uncovered enemy receives damage"), TargetPS->CurrentHealth < 100.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSInitialTeamSpawnTest, "LatencyCombat.Baseline.InitialTeamSpawn",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFPSInitialTeamSpawnTest::RunTest(const FString& Parameters)
+{
+	FFPSBaselineTestWorld Fixture;
+	auto* GM = Fixture.World->GetAuthGameMode<ALatencyMultiCombatGameMode>();
+	Fixture.World->SpawnActor<APlayerStart>(FVector(-900, 0, 100), FRotator::ZeroRotator)->PlayerStartTag = TEXT("Red");
+	Fixture.World->SpawnActor<APlayerStart>(FVector(900, 0, 100), FRotator(0, 180, 0))->PlayerStartTag = TEXT("Blue");
+	auto* RedPC = Fixture.World->SpawnActor<ALatencyMultiCombatPlayerController>();
+	RedPC->Player = NewObject<ULocalPlayer>(GEngine);
+	TArray<ETeamSide> TeamsAtSpawn;
+	ALatencyMultiCombatPlayerController* JoiningPC = RedPC;
+	const FDelegateHandle SpawnObserver = Fixture.World->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateLambda([&](AActor* Actor)
+	{
+		if (Cast<ALatencyMultiCombatCharacter>(Actor)) TeamsAtSpawn.Add(JoiningPC->GetPlayerState<ALatencyMultiCombatPlayerState>()->Team);
+	}));
+	TestTrue(TEXT("Red login initialization succeeds"), GM->InitNewPlayer(RedPC, FUniqueNetIdRepl(), TEXT(""), TEXT("")).IsEmpty());
+	TestTrue(TEXT("Initial red cached start uses team"), RedPC->StartSpot.IsValid() && RedPC->StartSpot->GetActorLocation().X < 0.f);
+	GM->PostLogin(RedPC);
+	auto* BluePC = Fixture.World->SpawnActor<ALatencyMultiCombatPlayerController>();
+	BluePC->Player = NewObject<ULocalPlayer>(GEngine);
+	JoiningPC = BluePC;
+	TestTrue(TEXT("Blue login initialization succeeds"), GM->InitNewPlayer(BluePC, FUniqueNetIdRepl(), TEXT(""), TEXT("")).IsEmpty());
+	TestTrue(TEXT("Initial blue cached start uses team"), BluePC->StartSpot.IsValid() && BluePC->StartSpot->GetActorLocation().X > 0.f);
+	GM->PostLogin(BluePC);
+	Fixture.World->RemoveOnActorSpawnedHandler(SpawnObserver);
+	TestEqual(TEXT("Both initial spawn events observed"), TeamsAtSpawn.Num(), 2);
+	if (TeamsAtSpawn.Num() == 2)
+	{
+		TestTrue(TEXT("Red team exists when pawn is spawned"), TeamsAtSpawn[0] == ETeamSide::Red);
+		TestTrue(TEXT("Blue team exists when pawn is spawned"), TeamsAtSpawn[1] == ETeamSide::Blue);
+	}
+	TestTrue(TEXT("First player assigned red"), RedPC->GetPlayerState<ALatencyMultiCombatPlayerState>()->Team == ETeamSide::Red);
+	TestTrue(TEXT("Second player assigned blue"), BluePC->GetPlayerState<ALatencyMultiCombatPlayerState>()->Team == ETeamSide::Blue);
+	APawn* RedPawn = RedPC->GetPawn();
+	APawn* BluePawn = BluePC->GetPawn();
+	if (TestNotNull(TEXT("First PostLogin spawns pawn"), RedPawn)) TestTrue(TEXT("Initial red spawn uses assigned team"), RedPawn->GetActorLocation().X < 0.f);
+	if (TestNotNull(TEXT("Second PostLogin spawns pawn"), BluePawn)) TestTrue(TEXT("Initial blue spawn uses assigned team"), BluePawn->GetActorLocation().X > 0.f);
+	// A stale start on the opposing side must not override team selection at restart.
+	BluePC->StartSpot = RedPC->StartSpot;
+	AActor* RestartStart = GM->FindPlayerStart(BluePC);
+	TestTrue(TEXT("Restart ignores cached opposing start"), RestartStart && RestartStart->GetActorLocation().X > 0.f);
 	return true;
 }
 #endif

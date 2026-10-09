@@ -6,6 +6,7 @@
 #include "LatencyMultiCombatPlayerController.generated.h"
 
 class UInputMappingContext;
+class UCombatBenchmarkComponent;
 
 UCLASS()
 class LATENCY_MULTICOMBAT_API ALatencyMultiCombatPlayerController : public APlayerController
@@ -14,6 +15,8 @@ class LATENCY_MULTICOMBAT_API ALatencyMultiCombatPlayerController : public APlay
 
 public:
 	ALatencyMultiCombatPlayerController();
+	UPROPERTY(VisibleAnywhere, Category = "Testing")
+	TObjectPtr<UCombatBenchmarkComponent> Benchmark;
 
 	// Input Mapping Context - assign in Blueprint subclass or Default__ asset
 	// Optional mapping context for a complete set of character Enhanced Input actions.

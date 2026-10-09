@@ -24,13 +24,31 @@ void ALatencyMultiCombatGameMode::BeginPlay()
 	UE_LOG(LogTemp, Display, TEXT("[DM] Server-authoritative FPS baseline started. TeamSize=%d"), TeamSize);
 }
 
+void ALatencyMultiCombatGameMode::AssignPlayerTeam(APlayerController* NewPlayer)
+{
+	if (NewPlayer)
+		if (auto* PS = NewPlayer->GetPlayerState<ALatencyMultiCombatPlayerState>())
+			if (PS->Team == ETeamSide::Neutral)
+				if (auto* GS = GetDMGameState()) GS->AddPlayerToTeam(PS, AssignTeam());
+}
+
+FString ALatencyMultiCombatGameMode::InitNewPlayer(APlayerController* NewPlayer, const FUniqueNetIdRepl& UniqueId, const FString& Options, const FString& Portal)
+{
+	// InitNewPlayer chooses and caches a start before PostLogin. Assign the team first.
+	AssignPlayerTeam(NewPlayer);
+	return Super::InitNewPlayer(NewPlayer, UniqueId, Options, Portal);
+}
+
 void ALatencyMultiCombatGameMode::PostLogin(APlayerController* NewPlayer)
 {
+	AssignPlayerTeam(NewPlayer);
 	Super::PostLogin(NewPlayer);
-	if (!NewPlayer) return;
-	if (auto* PS = NewPlayer->GetPlayerState<ALatencyMultiCombatPlayerState>())
-		if (PS->Team == ETeamSide::Neutral)
-			if (auto* GS = GetDMGameState()) GS->AddPlayerToTeam(PS, AssignTeam());
+}
+
+bool ALatencyMultiCombatGameMode::ShouldSpawnAtStartSpot(AController* Player)
+{
+	// Re-evaluate team and occupancy on every restart, including simultaneous respawns.
+	return false;
 }
 
 void ALatencyMultiCombatGameMode::Logout(AController* Exiting)

@@ -14,6 +14,10 @@ class UInputAction;
 class UStaticMeshComponent;
 class UMaterialInstanceDynamic;
 
+DECLARE_MULTICAST_DELEGATE_OneParam(FBaselineShotSubmitted, uint32);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FBaselineShotFeedback, uint32, bool);
+DECLARE_MULTICAST_DELEGATE_OneParam(FBaselineHitConfirmed, uint32);
+
 UCLASS()
 class LATENCY_MULTICOMBAT_API ALatencyMultiCombatCharacter : public ACharacter
 {
@@ -55,6 +59,9 @@ public:
 	int32 ReserveAmmo = 90;
 
 	void FireWeapon();
+	FBaselineShotSubmitted OnShotSubmitted;
+	FBaselineShotFeedback OnShotFeedback;
+	FBaselineHitConfirmed OnHitConfirmed;
 	void StartReload();
 	void StopReload();
 	bool CanFire() const;
@@ -79,24 +86,25 @@ protected:
 	void ADSStarted(const FInputActionValue& Value);
 	void ADSEnded(const FInputActionValue& Value);
 
-	// Only aiming intent crosses this boundary. Origin, target, ammo and damage stay on the server.
+	// Aiming intent and a correlation ID cross this boundary. Origin, target, ammo and damage stay on the server.
 	UFUNCTION(Server, Reliable)
-	void ServerFire(FRotator AimRotation);
+	void ServerFire(FRotator AimRotation, uint32 ShotId);
 	UFUNCTION(Server, Reliable)
 	void ServerStartReload();
 	UFUNCTION(Server, Reliable)
 	void ServerSetADS(bool bNewADS);
 	UFUNCTION(NetMulticast, Unreliable)
-	void MulticastShot(FVector_NetQuantize TraceStart, FVector_NetQuantize TraceEnd, bool bBlockingHit);
+	void MulticastShot(FVector_NetQuantize TraceStart, FVector_NetQuantize TraceEnd, bool bBlockingHit, uint32 ShotId, bool bDamagedPlayer);
 	UFUNCTION(Client, Unreliable)
-	void ClientConfirmHit();
+	void ClientConfirmHit(uint32 ShotId);
 	UFUNCTION()
 	void OnRep_CombatState();
 
 private:
 	void ApplyCharacterStats();
 	void ApplyWeaponStats();
-	void HandleServerFire(const FRotator& AimRotation);
+	void HandleServerFire(const FRotator& AimRotation, uint32 ShotId);
+	uint32 NextShotId = 0;
 	void SetADS(bool bNewADS);
 	void RefreshCombatState();
 	void UpdateBodyColor();

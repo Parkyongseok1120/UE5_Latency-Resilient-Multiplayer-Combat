@@ -1,10 +1,10 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "GameFramework/HUD.h"
-#include "LatencyMultiCombatHUD.generated.h"
+#include "CombatHUD.generated.h"
 
 UCLASS()
-class LATENCY_MULTICOMBAT_API ALatencyMultiCombatHUD : public AHUD
+class LATENCY_MULTICOMBAT_API ACombatHUD : public AHUD
 {
 	GENERATED_BODY()
 public:

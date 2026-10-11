@@ -1,4 +1,4 @@
-// Latency_MultiCombat - Weapon Data Asset
+// Weapon Data Asset
 #pragma once
 
 #include "CoreMinimal.h"

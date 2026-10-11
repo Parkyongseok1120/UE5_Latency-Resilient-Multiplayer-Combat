@@ -10,9 +10,9 @@ UE 5.7의 서버 권위 FPS 팀 데스매치 Baseline을 구현했다. 기본 �
 - 조준점, 서버 명중 확인 표시, HP·방어구·탄약·K/D·팀 점수 HUD.
 - 균형 팀 배정, 팀별 스폰, 사망 시 이동·발사 차단, 기본 3초 후 리스폰, 기본 50킬 승리.
 
-발사 입력은 Character의 `ServerFire(AimRotation, ShotId)`로 전달한다. `ShotId`는 계측 응답을 연결한다. 서버가 발사 속도·탄약·재장전·사망·경기 종료 상태를 검사하고, 서버의 카메라 위치에서 hitscan을 수행한다. 클라이언트는 피해량·발사 위치·명중 대상을 전달하지 않는다. 서버가 데이터 에셋의 피해량과 미터 단위 거리 감쇠를 계산해 HP와 방어구를 변경한다. 같은 팀에 대한 피해는 기본적으로 비활성화되어 있다.
+발사 입력은 Character가 소유한 `CombatWeapon` 액터의 `WeaponFireComponent::ServerFire(AimRotation, ShotId)`로 전달한다. `ShotId`는 계측 응답을 연결한다. 서버가 발사 속도·탄약·재장전·사망·경기 종료 상태를 검사하고, 서버의 카메라 위치에서 hitscan을 수행한다. 클라이언트는 피해량·발사 위치·명중 대상을 전달하지 않는다. 서버가 데이터 에셋의 피해량과 미터 단위 거리 감쇠를 계산해 HP와 방어구를 변경한다. 같은 팀에 대한 피해는 기본적으로 비활성화되어 있다.
 
-HP·방어구·사망·K/D·팀 점수는 모든 클라이언트에 복제하고, 탄약은 무기 소유 클라이언트에 복제한다. 사격 표시와 명중 확인은 서버가 승인한 뒤 전달된다. 전투의 Prediction/Reconciliation과 Lag Compensation은 후속 단계이며, 이동은 기본 `CharacterMovement`의 네트워크 처리를 사용한다.
+HP·방어구·사망은 PlayerState의 `HealthComponent`, K/D·팀은 PlayerState, 팀 점수는 GameState가 관리하고 모든 클라이언트에 복제한다. 탄약은 무기 액터의 `WeaponAmmoComponent`가 관리하고 무기 소유 클라이언트에만 복제한다. 사격 표시와 명중 확인은 서버가 승인한 뒤 전달된다. 전투의 Prediction/Reconciliation과 Lag Compensation은 후속 단계이며, 이동은 기본 `CharacterMovement`의 네트워크 처리를 사용한다.
 
 ## 실행
 
@@ -73,3 +73,9 @@ Unreal Automation의 `LatencyCombat`에는 서버 발사 간격, 초기 hitscan 
 ```powershell
 & 'C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe' .\Latency_MultiCombat.uproject -EnablePlugins=PythonScriptPlugin -run=pythonscript "-script=$PWD\Scripts\CreateFPSBaselineMap.py" -unattended -nullrhi -NoSound
 ```
+
+## 소스 구조
+
+무기는 별도 `CombatWeapon` 액터이며 발사·판정, 탄약·재장전, 표현은 각각 컴포넌트가 소유한다. Character는 이동과 Pawn 생명주기를 연결하고, 입력은 Enhanced Input 컴포넌트와 입력 데이터 에셋에서 관리한다. 레거시 입력 경로와 Character·PlayerState의 중계 API를 제거했다. 클래스명·파일명의 프로젝트 접두어를 제거했고 기존 Blueprint 부모 클래스는 CoreRedirects로 연결한다. 상세 책임, SSOT 위치와 이전 API 대응은 [구조 문서](Docs/CombatArchitecture.md)에 정리한다.
+
+M3의 현재 미구현 범위와 후속 작업은 [Lag Compensation 구현 계획](Docs/LagCompensationPlan.md)에 정리한다.

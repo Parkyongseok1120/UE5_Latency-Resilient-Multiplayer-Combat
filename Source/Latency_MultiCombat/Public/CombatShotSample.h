@@ -15,14 +15,20 @@ struct FCombatShotSample
 	bool bHit = false;
 	bool Feedback(uint32 Id, bool bDamage, double Now)
 	{
-		if (Id != ShotId || FeedbackMs >= 0.0 || Now < StartedAt) return false;
+		if (Id != ShotId || FeedbackMs >= 0.0 || Now < StartedAt)
+		{
+			return false;
+		}
 		FeedbackMs = (Now - StartedAt) * 1000.0;
 		bHit = bDamage;
 		return true;
 	}
 	bool Confirm(uint32 Id, double Now)
 	{
-		if (Id != ShotId || HitConfirmMs >= 0.0 || Now < StartedAt) return false;
+		if (Id != ShotId || HitConfirmMs >= 0.0 || Now < StartedAt)
+		{
+			return false;
+		}
 		HitConfirmMs = (Now - StartedAt) * 1000.0;
 		return true;
 	}

@@ -4,7 +4,9 @@
 
 ## 현재 호출 흐름
 
-`FireWeapon → ServerFire(AimRotation, ShotId) → HandleServerFire → 서버 hitscan / ApplyDamage → MulticastShot / ClientConfirmHit / PlayerState 복제`.
+`CombatInputComponent → CombatWeapon.Fire::FireWeapon → Fire::ServerFire(AimRotation, ShotId) → 서버 hitscan / ApplyDamage → Fire의 MulticastShot / ClientConfirmHit / PlayerState.Health 복제`.
+
+무기 액터 및 컴포넌트 분리 후에도 승인 시점과 RPC 신뢰성은 기존 Baseline과 같다. 후속 승인 대기 목록·보정 프로토콜은 무기의 Fire 컴포넌트와 Ammo 상태를 기준으로 구현한다.
 
 클라이언트는 조준 의도와 발사 식별자를 전달한다. 발사 위치, 대상, 피해량, 탄약, 사망, 점수는 서버에서 결정한다. `ShotId`는 이번 계측에서 응답을 연결하기 위한 값이며, 현재 서버의 승인 순서나 보안 검증을 대신하지 않는다. 사격 효과와 명중 확인은 승인된 서버 응답 뒤에 실행되므로 지연에 따른 반응 시간 차이가 생긴다.
 

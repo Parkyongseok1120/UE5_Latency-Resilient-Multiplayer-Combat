@@ -1,4 +1,4 @@
-// Latency_MultiCombat - Character Data Asset
+// Character Data Asset
 #pragma once
 
 #include "CoreMinimal.h"

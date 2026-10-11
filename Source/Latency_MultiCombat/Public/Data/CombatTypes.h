@@ -1,4 +1,4 @@
-// Latency_MultiCombat - Consolidated Combat Data Types (SSOT)
+// Consolidated Combat Data Types (SSOT)
 #pragma once
 
 #include "CoreMinimal.h"
@@ -11,20 +11,20 @@
 UENUM(BlueprintType)
 enum class ECombatState : uint8
 {
-	Idle		UMETA(DisplayName = "Idle"),
-	Moving		UMETA(DisplayName = "Moving"),
-	Aiming		UMETA(DisplayName = "Aiming"),
-	Firing		UMETA(DisplayName = "Firing"),
-	Reloading	UMETA(DisplayName = "Reloading"),
-	Dead		UMETA(DisplayName = "Dead")
+	Idle UMETA(DisplayName = "Idle"),
+	Moving UMETA(DisplayName = "Moving"),
+	Aiming UMETA(DisplayName = "Aiming"),
+	Firing UMETA(DisplayName = "Firing"),
+	Reloading UMETA(DisplayName = "Reloading"),
+	Dead UMETA(DisplayName = "Dead")
 };
 
 UENUM(BlueprintType)
 enum class ETeamSide : uint8
 {
-	Neutral	UMETA(DisplayName = "Neutral"),
-	Red		UMETA(DisplayName = "Red Team"),
-	Blue	UMETA(DisplayName = "Blue Team")
+	Neutral UMETA(DisplayName = "Neutral"),
+	Red UMETA(DisplayName = "Red Team"),
+	Blue UMETA(DisplayName = "Blue Team")
 };
 
 // ─────────────────────────────────────────────
@@ -91,6 +91,9 @@ struct FCharacterStats
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character|Health")
 	float MaxArmor = 50.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character|Health", meta = (ClampMin = "0", ClampMax = "1"))
+	float ArmorAbsorptionRatio = 0.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character|Health")
 	float HealthRegenRate = 5.0f; // HP per second

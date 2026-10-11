@@ -4,8 +4,9 @@
 #include "CombatShotSample.h"
 #include "CombatBenchmarkComponent.generated.h"
 
-class ALatencyMultiCombatCharacter;
-class ALatencyMultiCombatPlayerState;
+class ACombatCharacter;
+class ACombatPlayerState;
+class UWeaponFireComponent;
 
 // Development-only opt-in behavior. No replicated test state or test damage RPCs.
 UCLASS()
@@ -14,20 +15,24 @@ class LATENCY_MULTICOMBAT_API UCombatBenchmarkComponent : public UActorComponent
 	GENERATED_BODY()
 public:
 	UCombatBenchmarkComponent();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* TickFunction) override;
+	virtual void TickComponent(
+		float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* TickFunction) override;
+
 private:
 #if !UE_BUILD_SHIPPING
-	void BindCharacter(ALatencyMultiCombatCharacter* Character);
+	void BindCharacter(ACombatCharacter* Character);
 	void Submitted(uint32 ShotId);
 	void Feedback(uint32 ShotId, bool bDamagedPlayer);
 	void Confirmed(uint32 ShotId);
 	void Finish(bool bSuccess, const TCHAR* Reason);
-	TWeakObjectPtr<ALatencyMultiCombatCharacter> BoundCharacter;
-	TWeakObjectPtr<ALatencyMultiCombatCharacter> InitialBluePawn;
-	TWeakObjectPtr<ALatencyMultiCombatPlayerState> TargetState;
+	TWeakObjectPtr<ACombatCharacter> BoundCharacter;
+	TWeakObjectPtr<UWeaponFireComponent> BoundFire;
+	TWeakObjectPtr<ACombatCharacter> InitialBluePawn;
+	TWeakObjectPtr<ACombatPlayerState> TargetState;
 	FCombatShotSample Sample;
 	bool bShooter = false;
 	bool bFinished = false;

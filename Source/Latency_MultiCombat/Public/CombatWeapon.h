@@ -11,6 +11,7 @@ class UStaticMeshComponent;
 class UWeaponFireComponent;
 class UWeaponAmmoComponent;
 class UWeaponPresentationComponent;
+class UWeaponHitValidationComponent;
 
 // The server spawns one weapon per pawn; its owner chain routes component RPCs to the owning client.
 UCLASS()
@@ -27,6 +28,8 @@ public:
 	TObjectPtr<UWeaponAmmoComponent> Ammo;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
 	TObjectPtr<UWeaponPresentationComponent> Presentation;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
+	TObjectPtr<UWeaponHitValidationComponent> HitValidation;
 	// Spawn configuration, replicated so remote clients load the same visual/audio assets.
 	UPROPERTY(EditDefaultsOnly, ReplicatedUsing = OnRep_WeaponData, BlueprintReadOnly, Category = "Weapon")
 	TObjectPtr<UWeaponDataAsset> WeaponData;

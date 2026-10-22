@@ -1,4 +1,7 @@
 #include "CombatGameMode.h"
+#include "Data/CombatNetworkDataAsset.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "Components/HealthComponent.h"
 #include "CombatGameState.h"
 #include "CombatPlayerState.h"
@@ -8,9 +11,13 @@
 #include "Components/RespawnComponent.h"
 #include "Components/TeamSpawnComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "UObject/ConstructorHelpers.h"
 
 ACombatGameMode::ACombatGameMode()
 {
+	static ConstructorHelpers::FObjectFinderOptional<UCombatNetworkDataAsset> NetworkDefaults(
+		TEXT("/Game/Data/DA_CombatNetwork.DA_CombatNetwork"), LOAD_NoWarn | LOAD_Quiet);
+	NetworkData = NetworkDefaults.Get();
 	PlayerStateClass = ACombatPlayerState::StaticClass();
 	GameStateClass = ACombatGameState::StaticClass();
 	DefaultPawnClass = ACombatCharacter::StaticClass();
@@ -23,6 +30,15 @@ ACombatGameMode::ACombatGameMode()
 void ACombatGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+	if (ACombatGameState* State = GetDMGameState())
+	{
+		State->LagCompensation = (NetworkData ? NetworkData->LagCompensation : FLagCompensationSettings()).Normalized();
+		if (FParse::Param(FCommandLine::Get(), TEXT("NoLagCompensation")))
+		{
+			State->LagCompensation.bEnabled = false;
+		}
+		State->ForceNetUpdate();
+	}
 	UE_LOG(LogTemp, Display, TEXT("[DM] Server-authoritative FPS baseline started. TeamSize=%d"), TeamSize);
 }
 

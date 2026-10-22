@@ -9,6 +9,7 @@ class ACombatGameState;
 class ACombatPlayerState;
 class UTeamSpawnComponent;
 class URespawnComponent;
+class UCombatNetworkDataAsset;
 
 UCLASS()
 class LATENCY_MULTICOMBAT_API ACombatGameMode : public AGameModeBase
@@ -16,6 +17,8 @@ class LATENCY_MULTICOMBAT_API ACombatGameMode : public AGameModeBase
 	GENERATED_BODY()
 public:
 	ACombatGameMode();
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Network")
+	TObjectPtr<UCombatNetworkDataAsset> NetworkData;
 	UPROPERTY(EditDefaultsOnly, Category = "Deathmatch", meta = (ClampMin = "1"))
 	int32 TeamSize = 4;
 	UPROPERTY(EditDefaultsOnly, Category = "Deathmatch", meta = (ClampMin = "0.1"))

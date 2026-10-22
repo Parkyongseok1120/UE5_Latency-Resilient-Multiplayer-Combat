@@ -1,0 +1,11 @@
+LatencyMs,Mode,Repetition,Samples,Result,Logs
+0,Off,1,24,PASS,Saved/FPSBaseline/20261022-023030-734-0ms-rewind
+0,On,1,24,PASS,Saved/FPSBaseline/20261022-023117-860-0ms-rewind
+50,Off,1,24,PASS,Saved/FPSBaseline/20261022-023203-909-50ms-rewind
+50,On,1,24,PASS,Saved/FPSBaseline/20261022-023251-528-50ms-rewind
+100,Off,1,24,PASS,Saved/FPSBaseline/20261022-023339-611-100ms-rewind
+100,On,1,24,PASS,Saved/FPSBaseline/20261022-023427-060-100ms-rewind
+150,Off,1,24,PASS,Saved/FPSBaseline/20261022-023040-882-150ms-rewind
+150,On,1,24,PASS,Saved/FPSBaseline/20261022-023131-155-150ms-rewind
+200,Off,1,24,PASS,Saved/FPSBaseline/20261022-023218-991-200ms-rewind
+200,On,1,24,PASS,Saved/FPSBaseline/20261022-023308-610-200ms-rewind

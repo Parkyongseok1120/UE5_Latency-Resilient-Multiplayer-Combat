@@ -4,7 +4,12 @@
 #include "CombatGameState.h"
 #include "Engine/World.h"
 
-FCharacterStats CombatRules::NormalizeCharacterStats(const FCharacterStats& Stats)
+static float ClampCombatValue(float Value, float Minimum, float Maximum, float Fallback)
+{
+	return FMath::Clamp(FMath::IsFinite(Value) ? Value : Fallback, Minimum, Maximum);
+}
+
+FCharacterStats FCombatRules::NormalizeCharacterStats(const FCharacterStats& Stats)
 {
 	FCharacterStats Result = Stats;
 	const FCharacterStats Defaults;
@@ -13,27 +18,46 @@ FCharacterStats CombatRules::NormalizeCharacterStats(const FCharacterStats& Stat
 	Result.ArmorAbsorptionRatio = FMath::IsFinite(Stats.ArmorAbsorptionRatio)
 		? FMath::Clamp(Stats.ArmorAbsorptionRatio, 0.f, 1.f)
 		: Defaults.ArmorAbsorptionRatio;
+	// 에셋 수치가 잘못 들어와도 이동이나 조준까지 깨지지는 않게 막아둠.
+	Result.WalkSpeed = ClampCombatValue(Stats.WalkSpeed, 0.f, 10000.f, Defaults.WalkSpeed);
+	Result.RunSpeed = ClampCombatValue(Stats.RunSpeed, 0.f, 10000.f, Defaults.RunSpeed);
+	Result.CrouchSpeed = ClampCombatValue(Stats.CrouchSpeed, 0.f, 10000.f, Defaults.CrouchSpeed);
+	Result.JumpVelocity = ClampCombatValue(Stats.JumpVelocity, 0.f, 10000.f, Defaults.JumpVelocity);
+	Result.AirControl = ClampCombatValue(Stats.AirControl, 0.f, 1.f, Defaults.AirControl);
+	Result.AimDownSightFOV = ClampCombatValue(Stats.AimDownSightFOV, 20.f, 120.f, Defaults.AimDownSightFOV);
+	Result.HipFireSpreadMultiplier =
+		ClampCombatValue(Stats.HipFireSpreadMultiplier, 0.f, 10.f, Defaults.HipFireSpreadMultiplier);
 	return Result;
 }
 
-FCharacterStats CombatRules::ReadCharacterStats(const UCharacterDataAsset* Data)
+FCharacterStats FCombatRules::ReadCharacterStats(const UCharacterDataAsset* Data)
 {
 	return NormalizeCharacterStats(Data ? Data->Stats : FCharacterStats());
 }
 
-FWeaponStats CombatRules::ReadWeaponStats(const UWeaponDataAsset* Data)
+FWeaponStats FCombatRules::ReadWeaponStats(const UWeaponDataAsset* Data)
 {
 	FWeaponStats Stats = Data ? Data->Stats : FWeaponStats();
-	Stats.FireRate = FMath::Clamp(Stats.FireRate, 0.1f, 30.f);
+	const FWeaponStats Defaults;
+	Stats.Damage = ClampCombatValue(Stats.Damage, 0.f, 100000.f, Defaults.Damage);
+	Stats.FireRate = ClampCombatValue(Stats.FireRate, 0.1f, 30.f, Defaults.FireRate);
 	Stats.MagazineSize = FMath::Max(1, Stats.MagazineSize);
 	Stats.ReserveAmmo = FMath::Max(0, Stats.ReserveAmmo);
-	Stats.ReloadTime = FMath::Max(0.01f, Stats.ReloadTime);
-	Stats.MaxRange = FMath::Max(0.f, Stats.MaxRange);
-	Stats.MinDamageRatio = FMath::Clamp(Stats.MinDamageRatio, 0.f, 1.f);
+	Stats.ReloadTime = ClampCombatValue(Stats.ReloadTime, 0.01f, 600.f, Defaults.ReloadTime);
+	Stats.MaxRange = ClampCombatValue(Stats.MaxRange, 0.f, 100000.f, Defaults.MaxRange);
+	Stats.BaseSpread = ClampCombatValue(Stats.BaseSpread, 0.f, 45.f, Defaults.BaseSpread);
+	Stats.MovingSpreadMultiplier =
+		ClampCombatValue(Stats.MovingSpreadMultiplier, 0.f, 10.f, Defaults.MovingSpreadMultiplier);
+	Stats.HeadshotMultiplier = ClampCombatValue(Stats.HeadshotMultiplier, 0.f, 100.f, Defaults.HeadshotMultiplier);
+	Stats.RangeFalloffStart =
+		ClampCombatValue(Stats.RangeFalloffStart, 0.f, Stats.MaxRange, Defaults.RangeFalloffStart);
+	Stats.RangeFalloffEnd = ClampCombatValue(Stats.RangeFalloffEnd, Stats.RangeFalloffStart,
+		FMath::Max(Stats.RangeFalloffStart, Stats.MaxRange), Defaults.RangeFalloffEnd);
+	Stats.MinDamageRatio = ClampCombatValue(Stats.MinDamageRatio, 0.f, 1.f, Defaults.MinDamageRatio);
 	return Stats;
 }
 
-UWeaponDataAsset* CombatRules::ResolveWeaponData(UWeaponDataAsset* Override, const UCharacterDataAsset* CharacterData)
+UWeaponDataAsset* FCombatRules::ResolveWeaponData(UWeaponDataAsset* Override, const UCharacterDataAsset* CharacterData)
 {
 	if (Override)
 	{
@@ -43,7 +67,7 @@ UWeaponDataAsset* CombatRules::ResolveWeaponData(UWeaponDataAsset* Override, con
 																   : nullptr;
 }
 
-float CombatRules::DamageAtRange(const FWeaponStats& Stats, float DistanceCm)
+float FCombatRules::DamageAtRange(const FWeaponStats& Stats, float DistanceCm)
 {
 	const float Falloff = FMath::Clamp((DistanceCm / CentimetersPerMeter - Stats.RangeFalloffStart) /
 			FMath::Max(0.01f, Stats.RangeFalloffEnd - Stats.RangeFalloffStart),
@@ -51,7 +75,7 @@ float CombatRules::DamageAtRange(const FWeaponStats& Stats, float DistanceCm)
 	return Stats.Damage * FMath::Lerp(1.f, Stats.MinDamageRatio, Falloff);
 }
 
-bool CombatRules::IsMatchActive(const UWorld* World)
+bool FCombatRules::IsMatchActive(const UWorld* World)
 {
 	const ACombatGameState* GS = World ? World->GetGameState<ACombatGameState>() : nullptr;
 	return !GS || !GS->bMatchEnded;

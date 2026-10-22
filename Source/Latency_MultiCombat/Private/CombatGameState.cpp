@@ -1,10 +1,12 @@
 #include "CombatGameState.h"
+#include "Components/RewindBenchmarkComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "CombatPlayerState.h"
 
 ACombatGameState::ACombatGameState()
 	: RedTeamScore(0), BlueTeamScore(0), bMatchEnded(false), WinningTeam(ETeamSide::Neutral)
 {
+	RewindBenchmark = CreateDefaultSubobject<URewindBenchmarkComponent>(TEXT("RewindBenchmark"));
 }
 
 void ACombatGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -15,6 +17,7 @@ void ACombatGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME(ACombatGameState, BlueTeamScore);
 	DOREPLIFETIME(ACombatGameState, bMatchEnded);
 	DOREPLIFETIME(ACombatGameState, WinningTeam);
+	DOREPLIFETIME(ACombatGameState, LagCompensation);
 }
 
 int32 ACombatGameState::GetTeamMemberCount(ETeamSide Team) const

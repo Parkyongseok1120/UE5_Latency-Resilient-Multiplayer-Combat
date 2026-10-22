@@ -25,7 +25,7 @@ void UHealthComponent::InitializeForSpawn(const FCharacterStats& Stats)
 	{
 		return;
 	}
-	const FCharacterStats Resolved = CombatRules::NormalizeCharacterStats(Stats);
+	const FCharacterStats Resolved = FCombatRules::NormalizeCharacterStats(Stats);
 	MaxHealth = Resolved.MaxHealth;
 	SpawnArmor = Resolved.MaxArmor;
 	ArmorAbsorptionRatio = Resolved.ArmorAbsorptionRatio;

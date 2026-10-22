@@ -7,6 +7,7 @@
 
 class UCombatBenchmarkComponent;
 class UCombatSmokeComponent;
+class UCombatTimeSyncComponent;
 
 UCLASS()
 class LATENCY_MULTICOMBAT_API ACombatPlayerController : public APlayerController
@@ -15,6 +16,8 @@ class LATENCY_MULTICOMBAT_API ACombatPlayerController : public APlayerController
 
 public:
 	ACombatPlayerController();
+	UPROPERTY(VisibleAnywhere, Category = "Network")
+	TObjectPtr<UCombatTimeSyncComponent> TimeSync;
 	UPROPERTY(VisibleAnywhere, Category = "Testing")
 	TObjectPtr<UCombatBenchmarkComponent> Benchmark;
 	UPROPERTY(VisibleAnywhere, Category = "Testing")

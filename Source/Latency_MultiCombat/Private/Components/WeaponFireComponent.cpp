@@ -1,4 +1,8 @@
 #include "Components/WeaponFireComponent.h"
+#include "Components/WeaponHitValidationComponent.h"
+#include "Components/CombatTimeSyncComponent.h"
+#include "CombatPlayerController.h"
+#include "Data/CombatNetworkDataAsset.h"
 #include "Components/HealthComponent.h"
 #include "Components/WeaponAmmoComponent.h"
 #include "Components/WeaponPresentationComponent.h"
@@ -86,7 +90,7 @@ bool UWeaponFireComponent::CanFire() const
 	const ACombatPlayerState* PS = Character ? Character->GetPlayerState<ACombatPlayerState>() : nullptr;
 	return Character && Character->GetController() && PS && !PS->Health->IsDead() && !Weapon->Ammo->IsReloading() &&
 		Weapon->Ammo->GetMagazineAmmo() > 0 && CombatState != ECombatState::Dead &&
-		CombatState != ECombatState::Reloading && CombatRules::IsMatchActive(GetWorld());
+		CombatState != ECombatState::Reloading && FCombatRules::IsMatchActive(GetWorld());
 }
 
 void UWeaponFireComponent::FireWeapon()
@@ -97,87 +101,130 @@ void UWeaponFireComponent::FireWeapon()
 	}
 	const ACombatWeapon* Weapon = GetWeapon();
 	const ACombatCharacter* Character = Weapon->GetOwningCharacter();
-	if (Weapon->HasAuthority())
-	{
-		HandleServerFire(Character->GetBaseAimRotation(), ++NextShotId);
-		return;
-	}
-	if (!Character->IsLocallyControlled())
+	const ACombatPlayerController* PC = Cast<ACombatPlayerController>(Character->GetController());
+	if (!Weapon->HasAuthority() &&
+		(!Character->IsLocallyControlled() || !PC || !PC->TimeSync->IsReady() || !Character->GetLifeId().IsValid()))
 	{
 		return;
 	}
 	const float Now = GetWorld()->GetTimeSeconds();
-	if (Now - LastLocalFireTime < 1.f / Weapon->GetStats().FireRate)
+	if (!Weapon->HasAuthority() && Now - LastLocalFireTime < 1.f / Weapon->GetStats().FireRate)
 	{
 		return;
 	}
 	LastLocalFireTime = Now;
-	const uint32 ShotId = ++NextShotId;
-	OnShotSubmitted.Broadcast(ShotId);
-	ServerFire(Character->GetBaseAimRotation(), ShotId);
-}
-
-void UWeaponFireComponent::ServerFire_Implementation(FRotator AimRotation, uint32 ShotId)
-{
-	HandleServerFire(AimRotation, ShotId);
-}
-
-void UWeaponFireComponent::HandleServerFire(const FRotator& AimRotation, uint32 ShotId)
-{
-	if (!GetOwner()->HasAuthority() || !CanFire() || AimRotation.ContainsNaN())
+	FCombatShotCommand Command;
+	Command.ShotId = ++NextShotId;
+	Command.LifeId = Character->GetLifeId();
+	Command.ServerFireTime = PC ? PC->TimeSync->GetServerTime() : Now;
+	Command.AimRotation = Character->GetBaseAimRotation();
+	OnShotSubmitted.Broadcast(Command.ShotId);
+	if (Weapon->HasAuthority())
 	{
-		return;
+		ClientShotResult(ProcessShotCommand(Command));
+	}
+	else
+	{
+		ServerFire(Command);
+	}
+}
+
+void UWeaponFireComponent::ServerFire_Implementation(FCombatShotCommand Command)
+{
+	ClientShotResult(ProcessShotCommand(Command));
+}
+
+EShotRejection UWeaponFireComponent::ValidateCommand(const FCombatShotCommand& Command)
+{
+	const ACombatWeapon* Weapon = GetWeapon();
+	const ACombatCharacter* Character = Weapon ? Weapon->GetOwningCharacter() : nullptr;
+	if (!Character || !Weapon->HasAuthority() || !Character->GetController())
+	{
+		return EShotRejection::InvalidOwner;
+	}
+	if (!Command.LifeId.IsValid() || Command.LifeId != Character->GetLifeId())
+	{
+		return EShotRejection::InvalidLife;
+	}
+	if (Command.ShotId == 0 || Command.ShotId <= LastProcessedShotId)
+	{
+		return EShotRejection::InvalidSequence;
+	}
+	// 거절한 요청도 처리한 번호로 남겨서 같은 요청을 다시 못 쓰게 함.
+	LastProcessedShotId = Command.ShotId;
+	if (!FMath::IsFinite(Command.AimRotation.Pitch) || !FMath::IsFinite(Command.AimRotation.Yaw) ||
+		!FMath::IsFinite(Command.AimRotation.Roll))
+	{
+		return EShotRejection::InvalidAim;
+	}
+	if (!FMath::IsFinite(Command.ServerFireTime))
+	{
+		return EShotRejection::InvalidTime;
+	}
+	const double Now = GetWorld()->GetTimeSeconds();
+	const FLagCompensationSettings Settings = FLagCompensationSettings::Get(GetWorld());
+	if (Command.ServerFireTime > Now + Settings.FutureTolerance)
+	{
+		return EShotRejection::Future;
+	}
+	if (Now - Command.ServerFireTime > Settings.MaxRewindSeconds)
+	{
+		return EShotRejection::TooOld;
+	}
+	if (Command.ServerFireTime < LastAcceptedShotTime)
+	{
+		return EShotRejection::OutOfOrderTime;
+	}
+	if (!CanFire())
+	{
+		return EShotRejection::CannotFire;
+	}
+	const double Interval = 1.0 / Weapon->GetStats().FireRate;
+	if (Now - LastFireTime + KINDA_SMALL_NUMBER < Interval ||
+		Command.ServerFireTime - LastAcceptedShotTime + KINDA_SMALL_NUMBER < Interval)
+	{
+		return EShotRejection::FireRate;
+	}
+	return EShotRejection::None;
+}
+
+FCombatShotResponse UWeaponFireComponent::ProcessShotCommand(const FCombatShotCommand& Command)
+{
+	FCombatShotResponse Response;
+	Response.ShotId = Command.ShotId;
+	Response.Rejection = ValidateCommand(Command);
+	if (Response.Rejection != EShotRejection::None)
+	{
+		return Response;
 	}
 	ACombatWeapon* Weapon = GetWeapon();
-	ACombatCharacter* Character = Weapon->GetOwningCharacter();
-	const FWeaponStats& Stats = Weapon->GetStats();
-	const float Now = GetWorld()->GetTimeSeconds();
-	if (Now - LastFireTime + KINDA_SMALL_NUMBER < 1.f / Stats.FireRate)
+	FHitResult Hit;
+	FVector Start, End, Direction;
+	Response.Rejection = Weapon->HitValidation->Resolve(Command, Hit, Start, End, Direction, Response);
+	if (Response.Rejection != EShotRejection::None)
 	{
-		return;
+		return Response;
 	}
 	if (!Weapon->Ammo->ConsumeRound())
 	{
-		return;
+		Response.Rejection = EShotRejection::CannotFire;
+		return Response;
 	}
-	LastFireTime = Now;
+	LastFireTime = GetWorld()->GetTimeSeconds();
+	LastAcceptedShotTime = Command.ServerFireTime;
 	SetCombatState(ECombatState::Firing);
-	const FVector Start = Character->GetPawnViewLocation();
-	const FRotator Aim(FMath::Clamp(FRotator::NormalizeAxis(AimRotation.Pitch), -89.f, 89.f),
-		FRotator::NormalizeAxis(AimRotation.Yaw), 0.f);
-	float Spread = Stats.BaseSpread;
-	if (!bIsADS)
+	if (Hit.bBlockingHit && Hit.GetActor())
 	{
-		Spread *= Character->GetCharacterStats().HipFireSpreadMultiplier;
+		const float Applied = Weapon->HitValidation->ApplyValidatedDamage(Hit, Direction);
+		Response.bDamagedPlayer = Applied > 0.f && Cast<ACombatCharacter>(Hit.GetActor());
 	}
-	if (Character->GetVelocity().SizeSquared2D() > CombatRules::MovingSpeedSquared)
-	{
-		Spread *= Stats.MovingSpreadMultiplier;
-	}
-	const FVector Direction = FMath::VRandCone(Aim.Vector(), FMath::DegreesToRadians(FMath::Clamp(Spread, 0.f, 45.f)));
-	const FVector End = Start + Direction * Stats.MaxRange * CombatRules::CentimetersPerMeter;
-	FHitResult Hit;
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(WeaponTrace), false, Character);
-	Params.AddIgnoredActor(Weapon);
-	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
-	bool bDamagedPlayer = false;
-	if (bHit && Hit.GetActor())
-	{
-		const float Applied =
-			UGameplayStatics::ApplyPointDamage(Hit.GetActor(), CombatRules::DamageAtRange(Stats, Hit.Distance),
-				Direction, Hit, Character->GetController(), Weapon, nullptr);
-		bDamagedPlayer = Applied > 0.f && Cast<ACombatCharacter>(Hit.GetActor());
-		if (bDamagedPlayer)
-		{
-			ClientConfirmHit(ShotId);
-		}
-	}
-	MulticastShot(Start, bHit ? Hit.ImpactPoint : End, bHit, ShotId, bDamagedPlayer);
+	MulticastShot(Start, End, Hit.bBlockingHit, Command.ShotId, Response.bDamagedPlayer);
 	GetOwner()->ForceNetUpdate();
 	if (Weapon->Ammo->GetMagazineAmmo() == 0)
 	{
 		Weapon->Ammo->StartReload();
 	}
+	return Response;
 }
 
 void UWeaponFireComponent::SetADS(bool bNewADS)
@@ -223,8 +270,8 @@ void UWeaponFireComponent::RefreshCombatState()
 	}
 	SetCombatState(bIsADS
 			? ECombatState::Aiming
-			: (Character->GetVelocity().SizeSquared2D() > CombatRules::MovingSpeedSquared ? ECombatState::Moving
-																						  : ECombatState::Idle));
+			: (Character->GetVelocity().SizeSquared2D() > FCombatRules::MovingSpeedSquared ? ECombatState::Moving
+																						   : ECombatState::Idle));
 }
 
 void UWeaponFireComponent::MarkDead()
@@ -265,16 +312,19 @@ void UWeaponFireComponent::MulticastShot_Implementation(
 	{
 		return;
 	}
-	const ACombatCharacter* Character = GetWeapon()->GetOwningCharacter();
-	if (Character && Character->IsLocallyControlled())
-	{
-		OnShotFeedback.Broadcast(ShotId, bDamagedPlayer);
-	}
 	GetWeapon()->Presentation->PlayShot(Start, End, bHit);
 }
 
-void UWeaponFireComponent::ClientConfirmHit_Implementation(uint32 ShotId)
+void UWeaponFireComponent::ClientShotResult_Implementation(FCombatShotResponse Response)
 {
-	GetWeapon()->Presentation->ConfirmHit();
-	OnHitConfirmed.Broadcast(ShotId);
+	OnShotResult.Broadcast(Response);
+	if (Response.Rejection == EShotRejection::None)
+	{
+		OnShotFeedback.Broadcast(Response.ShotId, Response.bDamagedPlayer);
+		if (Response.bDamagedPlayer)
+		{
+			GetWeapon()->Presentation->ConfirmHit();
+			OnHitConfirmed.Broadcast(Response.ShotId);
+		}
+	}
 }

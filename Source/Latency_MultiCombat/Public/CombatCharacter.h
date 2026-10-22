@@ -11,6 +11,7 @@ class UCombatInputComponent;
 class UStaticMeshComponent;
 class UCharacterPresentationComponent;
 class ACombatWeapon;
+class URewindHistoryComponent;
 
 // Engine-facing pawn: locomotion, input forwarding, possession and damage/death orchestration.
 UCLASS()
@@ -31,6 +32,9 @@ public:
 	TObjectPtr<UCharacterPresentationComponent> Presentation;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UCombatInputComponent> CombatInput;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Network")
+	TObjectPtr<URewindHistoryComponent> RewindHistory;
+	const FGuid& GetLifeId() const { return LifeId; }
 
 	UFUNCTION(BlueprintPure, Category = "Weapon")
 	ACombatWeapon* GetWeapon() const { return Weapon; }
@@ -58,4 +62,6 @@ private:
 	TObjectPtr<ACombatWeapon> Weapon;
 	TWeakObjectPtr<ACombatWeapon> BoundWeapon;
 	bool bDeathHandled = false;
+	UPROPERTY(Replicated)
+	FGuid LifeId;
 };

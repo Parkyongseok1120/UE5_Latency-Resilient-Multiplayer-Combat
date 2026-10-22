@@ -4,16 +4,14 @@
 #include "InputModifiers.h"
 #include "InputCoreTypes.h"
 
-namespace
-{
-UInputAction* CreateAction(UObject* Owner, const TCHAR* Name, EInputActionValueType Type)
+static UInputAction* CreateAction(UObject* Owner, const TCHAR* Name, EInputActionValueType Type)
 {
 	UInputAction* Action = NewObject<UInputAction>(Owner, Name);
 	Action->ValueType = Type;
 	return Action;
 }
 
-void MapAxis(UInputMappingContext* Context, UInputAction* Action, FKey Key, bool bY, bool bNegate)
+static void MapAxis(UInputMappingContext* Context, UInputAction* Action, FKey Key, bool bY, bool bNegate)
 {
 	FEnhancedActionKeyMapping& Mapping = Context->MapKey(Action, Key);
 	if (bNegate)
@@ -27,7 +25,6 @@ void MapAxis(UInputMappingContext* Context, UInputAction* Action, FKey Key, bool
 		Mapping.Modifiers.Add(Swizzle);
 	}
 }
-} // namespace
 
 bool UCombatInputDataAsset::IsComplete() const
 {

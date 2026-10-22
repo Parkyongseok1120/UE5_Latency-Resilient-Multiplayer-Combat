@@ -1,4 +1,5 @@
 #include "CombatCharacter.h"
+#include "Components/RewindHistoryComponent.h"
 #include "CombatGameMode.h"
 #include "CombatPlayerState.h"
 #include "CombatWeapon.h"
@@ -32,11 +33,16 @@ ACombatCharacter::ACombatCharacter()
 	BodyProxy->SetupAttachment(GetCapsuleComponent());
 	Presentation = CreateDefaultSubobject<UCharacterPresentationComponent>(TEXT("Presentation"));
 	CombatInput = CreateDefaultSubobject<UCombatInputComponent>(TEXT("CombatInput"));
+	RewindHistory = CreateDefaultSubobject<URewindHistoryComponent>(TEXT("RewindHistory"));
 	WeaponClass = ACombatWeapon::StaticClass();
 }
 
 void ACombatCharacter::BeginPlay()
 {
+	if (HasAuthority())
+	{
+		LifeId = FGuid::NewGuid();
+	}
 	Super::BeginPlay();
 	const FCharacterStats Stats = GetCharacterStats();
 	GetCharacterMovement()->MaxWalkSpeed = Stats.WalkSpeed;
@@ -49,7 +55,7 @@ void ACombatCharacter::BeginPlay()
 			this, this, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 		if (Weapon)
 		{
-			Weapon->WeaponData = CombatRules::ResolveWeaponData(Weapon->WeaponData, CharacterData);
+			Weapon->WeaponData = FCombatRules::ResolveWeaponData(Weapon->WeaponData, CharacterData);
 			UGameplayStatics::FinishSpawningActor(Weapon, FirstPersonCamera->GetComponentTransform());
 			Weapon->AttachToComponent(FirstPersonCamera, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 			Weapon->SetActorRelativeLocation(FVector(35.f, 14.f, -12.f));
@@ -75,6 +81,7 @@ void ACombatCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ACombatCharacter, Weapon);
+	DOREPLIFETIME(ACombatCharacter, LifeId);
 }
 
 void ACombatCharacter::OnRep_Weapon()
@@ -114,13 +121,14 @@ void ACombatCharacter::PossessedBy(AController* NewController)
 		if (ACombatPlayerState* PS = GetPlayerState<ACombatPlayerState>())
 		{
 			PS->Health->InitializeForSpawn(GetCharacterStats());
+			RewindHistory->ResetHistory();
 		}
 	}
 }
 
 FCharacterStats ACombatCharacter::GetCharacterStats() const
 {
-	return CombatRules::ReadCharacterStats(CharacterData);
+	return FCombatRules::ReadCharacterStats(CharacterData);
 }
 FVector ACombatCharacter::GetPawnViewLocation() const
 {
@@ -177,6 +185,7 @@ void ACombatCharacter::Die(AController* Killer)
 	{
 		HandleCombatStateChanged(ECombatState::Dead);
 	}
+	RewindHistory->RecordNow();
 	if (ACombatGameMode* GM = GetWorld()->GetAuthGameMode<ACombatGameMode>())
 	{
 		ACombatPlayerState* KillerPS = Killer ? Killer->GetPlayerState<ACombatPlayerState>() : nullptr;

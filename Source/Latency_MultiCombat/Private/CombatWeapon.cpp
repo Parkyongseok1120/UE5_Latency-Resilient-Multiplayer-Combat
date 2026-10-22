@@ -1,4 +1,5 @@
 #include "CombatWeapon.h"
+#include "Components/WeaponHitValidationComponent.h"
 #include "Components/WeaponFireComponent.h"
 #include "Components/WeaponAmmoComponent.h"
 #include "Components/WeaponPresentationComponent.h"
@@ -20,6 +21,7 @@ ACombatWeapon::ACombatWeapon()
 	Fire = CreateDefaultSubobject<UWeaponFireComponent>(TEXT("Fire"));
 	Ammo = CreateDefaultSubobject<UWeaponAmmoComponent>(TEXT("Ammo"));
 	Presentation = CreateDefaultSubobject<UWeaponPresentationComponent>(TEXT("Presentation"));
+	HitValidation = CreateDefaultSubobject<UWeaponHitValidationComponent>(TEXT("HitValidation"));
 }
 
 void ACombatWeapon::BeginPlay()
@@ -34,7 +36,7 @@ void ACombatWeapon::BeginPlay()
 
 void ACombatWeapon::OnRep_WeaponData()
 {
-	Stats = CombatRules::ReadWeaponStats(WeaponData);
+	Stats = FCombatRules::ReadWeaponStats(WeaponData);
 	Presentation->ApplyAssets();
 }
 

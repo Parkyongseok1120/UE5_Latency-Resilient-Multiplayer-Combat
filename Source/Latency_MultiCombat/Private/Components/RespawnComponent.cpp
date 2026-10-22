@@ -55,7 +55,7 @@ void URespawnComponent::EndPlay(const EEndPlayReason::Type Reason)
 void URespawnComponent::Respawn(AController* Controller)
 {
 	ACombatGameMode* GM = Cast<ACombatGameMode>(GetOwner());
-	if (!GM || !GM->HasAuthority() || !IsValid(Controller) || !CombatRules::IsMatchActive(GetWorld()))
+	if (!GM || !GM->HasAuthority() || !IsValid(Controller) || !FCombatRules::IsMatchActive(GetWorld()))
 	{
 		return;
 	}

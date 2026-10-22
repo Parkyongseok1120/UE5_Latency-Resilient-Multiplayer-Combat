@@ -25,55 +25,7 @@
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
 
-struct FFPSBaselineTestWorld
-{
-	UWorld* World;
-	UGameInstance* GameInstance;
-	FFPSBaselineTestWorld()
-	{
-		GameInstance = NewObject<UGameInstance>(GEngine);
-		GameInstance->InitializeStandalone();
-		World = GameInstance->GetWorld();
-		const FURL URL(
-			nullptr, TEXT("/Engine/Maps/Entry?game=/Script/Latency_MultiCombat.CombatGameMode"), TRAVEL_Absolute);
-		World->SetGameMode(URL);
-		World->InitializeActorsForPlay(URL);
-		World->BeginPlay();
-	}
-	~FFPSBaselineTestWorld()
-	{
-		World->EndPlay(EEndPlayReason::Quit);
-		GameInstance->Shutdown();
-		World->DestroyWorld(false);
-		GEngine->DestroyWorldContext(World);
-	}
-	ACombatPlayerController* SpawnPlayer(const FVector& Location, ETeamSide Team,
-		const FWeaponStats& WeaponStats = FWeaponStats(), UCharacterDataAsset* CharacterData = nullptr)
-	{
-		ACombatPlayerController* PC = World->SpawnActor<ACombatPlayerController>();
-		ACombatPlayerState* PS = PC->GetPlayerState<ACombatPlayerState>();
-		PS->SetTeam(Team);
-		UWeaponDataAsset* Weapon = NewObject<UWeaponDataAsset>(World);
-		Weapon->Stats = WeaponStats;
-		Weapon->Stats.BaseSpread = 0.f;
-		ACombatCharacter* Pawn =
-			World->SpawnActorDeferred<ACombatCharacter>(ACombatCharacter::StaticClass(), FTransform(Location));
-		Pawn->CharacterData = CharacterData ? CharacterData : NewObject<UCharacterDataAsset>(World);
-		Pawn->CharacterData->DefaultWeapon = Weapon;
-		UGameplayStatics::FinishSpawningActor(Pawn, FTransform(Location));
-		PC->Possess(Pawn);
-		return PC;
-	}
-	void Advance(float Seconds)
-	{
-		for (float Elapsed = 0.f; Elapsed < Seconds; Elapsed += 0.05f)
-		{
-			// TimerManager ticks once per engine frame even when several worlds exist.
-			++GFrameCounter;
-			World->Tick(LEVELTICK_All, 0.05f);
-		}
-	}
-};
+#include "CombatTestWorld.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSBaselineHealthAuthorityTest, "LatencyCombat.Baseline.HealthAuthority",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -358,8 +310,8 @@ bool FCombatDataAssetTest::RunTest(const FString& Parameters)
 	Fixture.Advance(0.35f);
 	TestEqual(TEXT("Custom reload completes in ammo component"), Pawn->GetWeapon()->Ammo->GetMagazineAmmo(), 9);
 	TestEqual(TEXT("Custom reload conserves ammo"), Pawn->GetWeapon()->Ammo->GetReserveAmmo(), 11);
-	TestEqual(TEXT("Shared damage rule uses centimeter conversion"), CombatRules::DamageAtRange(Stats, 5000.f), 40.f);
-	TestEqual(TEXT("Shared damage rule applies minimum ratio"), CombatRules::DamageAtRange(Stats, 12000.f), 20.f);
+	TestEqual(TEXT("Shared damage rule uses centimeter conversion"), FCombatRules::DamageAtRange(Stats, 5000.f), 40.f);
+	TestEqual(TEXT("Shared damage rule applies minimum ratio"), FCombatRules::DamageAtRange(Stats, 12000.f), 20.f);
 	return true;
 }
 #endif

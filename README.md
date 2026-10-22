@@ -10,9 +10,9 @@ UE 5.7의 서버 권위 FPS 팀 데스매치 Baseline을 구현했다. 기본 �
 - 조준점, 서버 명중 확인 표시, HP·방어구·탄약·K/D·팀 점수 HUD.
 - 균형 팀 배정, 팀별 스폰, 사망 시 이동·발사 차단, 기본 3초 후 리스폰, 기본 50킬 승리.
 
-발사 입력은 Character가 소유한 `CombatWeapon` 액터의 `WeaponFireComponent::ServerFire(AimRotation, ShotId)`로 전달한다. `ShotId`는 계측 응답을 연결한다. 서버가 발사 속도·탄약·재장전·사망·경기 종료 상태를 검사하고, 서버의 카메라 위치에서 hitscan을 수행한다. 클라이언트는 피해량·발사 위치·명중 대상을 전달하지 않는다. 서버가 데이터 에셋의 피해량과 미터 단위 거리 감쇠를 계산해 HP와 방어구를 변경한다. 같은 팀에 대한 피해는 기본적으로 비활성화되어 있다.
+발사 입력은 Character가 소유한 `CombatWeapon` 액터의 `WeaponFireComponent::ServerFire(FCombatShotCommand)`로 전달한다. 명령에는 발사 번호·생명 ID·서버 시계로 환산한 발사 시각·조준 방향을 포함한다. 서버가 발사 속도·탄약·재장전·사망·경기 종료 상태를 검사하고, 서버가 검증한 과거 카메라 원점과 표적 캡슐 이력으로 hitscan을 수행한다. 기능 off에서는 현재 월드 trace를 사용한다. 클라이언트는 피해량·발사 위치·명중 대상을 전달하지 않는다. 서버가 데이터 에셋의 피해량과 미터 단위 거리 감쇠를 계산해 HP와 방어구를 변경한다. 같은 팀에 대한 피해는 기본적으로 비활성화되어 있다.
 
-HP·방어구·사망은 PlayerState의 `HealthComponent`, K/D·팀은 PlayerState, 팀 점수는 GameState가 관리하고 모든 클라이언트에 복제한다. 탄약은 무기 액터의 `WeaponAmmoComponent`가 관리하고 무기 소유 클라이언트에만 복제한다. 사격 표시와 명중 확인은 서버가 승인한 뒤 전달된다. 전투의 Prediction/Reconciliation과 Lag Compensation은 후속 단계이며, 이동은 기본 `CharacterMovement`의 네트워크 처리를 사용한다.
+HP·방어구·사망은 PlayerState의 `HealthComponent`, K/D·팀은 PlayerState, 팀 점수는 GameState가 관리하고 모든 클라이언트에 복제한다. 탄약은 무기 액터의 `WeaponAmmoComponent`가 관리하고 무기 소유 클라이언트에만 복제한다. 사격 표시와 명중 확인은 서버가 승인한 뒤 전달된다. 서버 리와인드 Lag Compensation은 구현되어 있고, 전투의 로컬 Prediction/Reconciliation은 후속 단계다. 이동은 기본 `CharacterMovement`의 네트워크 처리를 사용한다.
 
 ## 실행
 
@@ -74,8 +74,25 @@ Unreal Automation의 `LatencyCombat`에는 서버 발사 간격, 초기 hitscan 
 & 'C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe' .\Latency_MultiCombat.uproject -EnablePlugins=PythonScriptPlugin -run=pythonscript "-script=$PWD\Scripts\CreateFPSBaselineMap.py" -unattended -nullrhi -NoSound
 ```
 
+## 6주차 Lag Compensation
+
+서버 이력 기록, RTT 기반 시각 동기화, 발사 번호·생명 ID·시각 검증, 과거 캡슐 판정과 현재 월드 엄폐 검사를 구현했다. 설정은 `/Game/Data/DA_CombatNetwork` 에셋에서 조정하며 기본 GameMode가 사용한다. 기존 무기·탄약·Health 컴포넌트를 재사용하고, 판정은 `WeaponHitValidationComponent`로 분리했다. 수치 검증과 거리 감쇠는 `FCombatRules` static 함수로 공유한다.
+
+```powershell
+# 이동 표적 5개 지연 × 보정 on/off, 총 240발
+.\Tools\Measure-Rewind.ps1
+
+# 화면 캡처와 실제 GPU 시간 기록
+.\Tools\Start-FPSBaseline.ps1 -RewindBenchmark -LatencyMs 100 -CaptureFrames
+
+# 보정 off로 현재 월드 판정 비교
+.\Tools\Start-FPSBaseline.ps1 -RewindBenchmark -LatencyMs 100 -DisableLagCompensation
+```
+
+Win64 Development Editor·Game 빌드와 `LatencyCombat` 17개 테스트를 검증했다. 240표본 실험에서 예상 명중 복원은 off 31/90, on 88/90이며, 의도적 miss의 오명중과 정상 요청 거절은 0이었다. 원시 표본과 한계는 [6주차 검증 결과](Docs/Week6Validation.md)에 있다. 현재 범위는 upright capsule이며 동적 엄폐물은 현재 서버 월드를 기준으로 처리한다.
+
 ## 소스 구조
 
 무기는 별도 `CombatWeapon` 액터이며 발사·판정, 탄약·재장전, 표현은 각각 컴포넌트가 소유한다. Character는 이동과 Pawn 생명주기를 연결하고, 입력은 Enhanced Input 컴포넌트와 입력 데이터 에셋에서 관리한다. 레거시 입력 경로와 Character·PlayerState의 중계 API를 제거했다. 클래스명·파일명의 프로젝트 접두어를 제거했고 기존 Blueprint 부모 클래스는 CoreRedirects로 연결한다. 상세 책임, SSOT 위치와 이전 API 대응은 [구조 문서](Docs/CombatArchitecture.md)에 정리한다.
 
-M3의 현재 미구현 범위와 후속 작업은 [Lag Compensation 구현 계획](Docs/LagCompensationPlan.md)에 정리한다.
+M3의 구현 정책과 재현 방법은 [Lag Compensation 문서](Docs/LagCompensationPlan.md), 6주차 테스트와 정량 결과는 [검증 결과](Docs/Week6Validation.md)에 정리한다.

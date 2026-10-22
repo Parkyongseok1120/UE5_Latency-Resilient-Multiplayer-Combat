@@ -56,7 +56,7 @@ void UWeaponAmmoComponent::StartReload()
 		}
 		return;
 	}
-	if (bIsReloading || !CombatRules::IsMatchActive(GetWorld()) || MagazineAmmo >= Weapon->GetStats().MagazineSize ||
+	if (bIsReloading || !FCombatRules::IsMatchActive(GetWorld()) || MagazineAmmo >= Weapon->GetStats().MagazineSize ||
 		ReserveAmmo <= 0)
 	{
 		return;

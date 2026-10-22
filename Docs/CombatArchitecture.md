@@ -7,10 +7,12 @@
 ```mermaid
 flowchart TD
     Character[CombatCharacter: 이동·Pawn 생명주기] --> Weapon[CombatWeapon: 별도 복제 액터]
+    Character --> History[RewindHistoryComponent: 서버 캡슐·원점 이력]
     Character --> Input[CombatInputComponent: Enhanced Input 바인딩]
     Input --> InputData[CombatInputDataAsset: 액션·키 매핑]
     Character --> CharacterVisual[CharacterPresentationComponent: 카메라·몸체 표현]
-    Weapon --> Fire[WeaponFireComponent: 발사·ADS·서버 판정·RPC]
+    Weapon --> Fire[WeaponFireComponent: 발사 명령·ADS·상태·RPC]
+    Weapon --> Hit[WeaponHitValidationComponent: 현재·과거 명중 판정]
     Weapon --> Ammo[WeaponAmmoComponent: 탄약·재장전]
     Weapon --> WeaponVisual[WeaponPresentationComponent: 메시·소리·명중 표시 시각]
     PlayerState[CombatPlayerState: 팀·K/D] --> Health[HealthComponent: HP·방어구·사망]
@@ -28,7 +30,7 @@ Character가 무기 액터를 서버에서 생성하고 Owner와 Instigator를 �
 | 무기 설정 | WeaponClass의 `CombatWeapon::WeaponData` → CharacterData의 DefaultWeapon → `FWeaponStats` 기본값 |
 | 입력 설정 | `CombatInputDataAsset`; 미지정 시 동일 타입의 런타임 기본 매핑 |
 | 검증된 무기 스탯 | `CombatWeapon::Stats`; 모든 무기 컴포넌트가 동일한 스냅샷 조회 |
-| 설정 조회·보정, 거리 감쇠, 단위 변환 | `Data/CombatRules` |
+| 설정 조회·보정, 거리 감쇠, 단위 변환 | `FCombatRules` static 함수 |
 | 실제 탄약·재장전 예약 | 무기의 `WeaponAmmoComponent` |
 | 발사 간격·발사 번호·ADS·전투 상태 | 무기의 `WeaponFireComponent` |
 | HP·방어구·사망, 스폰 HP/방어구 용량 | PlayerState의 `HealthComponent` |
@@ -48,8 +50,8 @@ Character가 무기 액터를 서버에서 생성하고 Owner와 Instigator를 �
 - 무기 액터, Fire의 CombatState/ADS는 소유 Pawn의 relevancy를 따른다.
 - 탄약은 Ammo 컴포넌트에서 `COND_OwnerOnly`로 복제한다.
 - Health 컴포넌트는 PlayerState에 부착하므로 Pawn 교체와 무관하게 유지되며 모든 클라이언트에 복제한다.
-- HP·탄약 쓰기는 소유 액터의 서버 권한을 확인한다. 클라이언트는 조준 방향과 발사 ID만 전달한다.
-- 서버 승인 이후 effects/hit 응답을 보내는 기존 Baseline 동작을 유지한다. Prediction/Reconciliation과 Lag Compensation은 후속 작업이다.
+- HP·탄약 쓰기는 소유 액터의 서버 권한을 확인한다. 클라이언트는 조준 방향·발사 번호·생명 ID·환산한 발사 시각만 전달한다.
+- 서버 승인 이후 effects/hit 응답을 보내는 기존 Baseline 동작을 유지한다. Lag Compensation은 이력·독립 판정 컴포넌트로 연결했다. 로컬 Prediction/Reconciliation은 후속 작업이다.
 - 계측은 Pawn과 무기가 각각 도착하는 순서를 가정하지 않고, 실제 Fire 컴포넌트가 바뀌면 delegate를 재연결한다.
 - PlayerController에는 입력 모드와 테스트 컴포넌트 구성만 남긴다. smoke 자동 조작은 `CombatSmokeComponent`, 정량 계측은 `CombatBenchmarkComponent`가 담당한다.
 - 타이머·스폰 관찰 콜백은 이름 있는 함수와 UObject/raw delegate 바인딩을 사용한다. C++ 소스에 람다를 사용하지 않는다.
@@ -66,7 +68,7 @@ Character가 무기 액터를 서버에서 생성하고 Owner와 Instigator를 �
 | Character.CurrentWeapon | WeaponClass의 WeaponData 또는 CharacterData.DefaultWeapon |
 | Character.IA_* / PlayerController.CombatMappingContext | Character.CombatInput.InputData의 액션과 MappingContext |
 | Character.OnShotSubmitted / OnShotFeedback / OnHitConfirmed | Weapon.Fire의 동일 delegate |
-| Character.ServerFire / ServerStartReload | Weapon.Fire.ServerFire / Weapon.Ammo.ServerStartReload |
+| Character.ServerFire / ServerStartReload | Weapon.Fire.ServerFire(FCombatShotCommand) / Weapon.Ammo.ServerStartReload |
 | PlayerState.CurrentHealth / CurrentArmor / MaxHealth / bIsDead | PlayerState.Health.GetHealth() / GetArmor() / GetMaxHealth() / IsDead() |
 | Character.FirstPersonWeapon | Character.GetWeapon().WeaponMesh |
 | GameMode.DefaultCharacterClass | GameMode.DefaultPawnClass |
@@ -88,3 +90,11 @@ CoreRedirects는 native 부모 클래스의 이름 변경을 처리한다. 제�
 - clang-format dry-run과 git diff --check 통과.
 
 네트워크 로그는 `Saved/FPSBaseline/RefactorVerification/`에 저장한다. 위 검증은 구조 변경의 회귀 검사다. 기존 360표본 결과를 다시 실행하거나 이동 표적의 Lag Compensation 성능을 검증한 결과는 아니다. 입력 테스트는 액션 매핑과 modifier의 방향·감도를 검사하며 실제 화면 렌더링과 물리 입력 지연은 측정하지 않는다.
+
+## 6주차 추가 경계
+
+`DA_CombatNetwork → GameMode → GameState.LagCompensation`이 네트워크 수치의 설정·검증·복제 경로다. PlayerController의 `CombatTimeSyncComponent`가 클라이언트 시계를 서버 기준으로 추정한다. Character의 `RewindHistoryComponent`는 서버에서만 기록하고, 새 Pawn마다 생명 ID와 버퍼를 새로 만든다.
+
+Fire는 명령 순서·시각·전투 상태를 검사하고 HitValidation에 판정을 맡긴다. Ammo의 실제 차감과 재장전, Character/Health/GameMode의 피해 권한과 점수 처리는 재사용한다. 실제 액터를 과거 위치로 옮기지 않는다. 승인·거절과 명중 확인은 Reliable `ClientShotResult`로 전달하며 시각 효과는 기존 multicast를 사용한다.
+
+상세 시간 정책과 현재 월드 동적 차폐물 경계는 [Lag Compensation 문서](LagCompensationPlan.md), Win64 빌드·자동화·네트워크·렌더링 결과는 [6주차 검증](Week6Validation.md)에 있다.

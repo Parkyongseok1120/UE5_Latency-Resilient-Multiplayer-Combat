@@ -4,9 +4,11 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameStateBase.h"
 #include "Data/CombatTypes.h"
+#include "Data/CombatNetworkDataAsset.h"
 #include "CombatGameState.generated.h"
 
 class ACombatPlayerState;
+class URewindBenchmarkComponent;
 
 UCLASS()
 class LATENCY_MULTICOMBAT_API ACombatGameState : public AGameStateBase
@@ -15,6 +17,10 @@ class LATENCY_MULTICOMBAT_API ACombatGameState : public AGameStateBase
 
 public:
 	ACombatGameState();
+	UPROPERTY(VisibleAnywhere, Category = "Testing")
+	TObjectPtr<URewindBenchmarkComponent> RewindBenchmark;
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Network")
+	FLagCompensationSettings LagCompensation;
 
 	// Team scores (total kills per team)
 	UPROPERTY(Replicated, BlueprintReadOnly)

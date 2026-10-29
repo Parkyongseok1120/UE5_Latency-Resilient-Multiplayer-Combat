@@ -29,6 +29,8 @@ private:
 	void Feedback(uint32 ShotId, bool bDamagedPlayer);
 	void Confirmed(uint32 ShotId);
 	void Finish(bool bSuccess, const TCHAR* Reason);
+	void CheckPresentation(ACombatCharacter* Character, ACombatCharacter* Peer);
+	void CheckAimIK(ACombatCharacter* Character, ACombatCharacter* Peer);
 	TWeakObjectPtr<ACombatCharacter> BoundCharacter;
 	TWeakObjectPtr<UWeaponFireComponent> BoundFire;
 	TWeakObjectPtr<ACombatCharacter> InitialBluePawn;
@@ -49,6 +51,12 @@ private:
 	bool bReloadVerified = false;
 	bool bCaptured = false;
 	bool bMovementLogged = false;
+	bool bPresentationCheck = false;
+	bool bPresentationReady = false;
+	bool bPresentationShot = false;
+	bool bAimIKCheck = false;
+	bool bSawAimUp = false;
+	bool bSawAimDown = false;
 	int32 ReloadTotalAmmo = 0;
 	int32 ReloadMagazineBefore = 0;
 	int32 SampleCount = 0;

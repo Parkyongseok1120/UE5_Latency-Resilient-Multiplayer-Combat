@@ -17,9 +17,14 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Data/UCharacterDataAsset.h"
 
 ACombatCharacter::ACombatCharacter()
 {
+	static ConstructorHelpers::FObjectFinderOptional<UCharacterDataAsset> DefaultCharacterData(
+		TEXT("/Game/Data/DA_DefaultCharacter.DA_DefaultCharacter"), LOAD_NoWarn | LOAD_Quiet);
+	CharacterData = DefaultCharacterData.Get();
 	bReplicates = true;
 	SetReplicateMovement(true);
 	bUseControllerRotationYaw = true;
@@ -27,6 +32,11 @@ ACombatCharacter::ACombatCharacter()
 	GetCapsuleComponent()->InitCapsuleSize(34.f, 88.f);
 	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	GetMesh()->SetOwnerNoSee(true);
+	GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	GetMesh()->SetRelativeLocationAndRotation(
+		CharacterData ? CharacterData->MeshLocationOffset : FVector(0.f, 0.f, -90.f),
+		CharacterData ? CharacterData->MeshRotationOffset : FRotator(0.f, -90.f, 0.f));
+	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
 	FirstPersonCamera->SetupAttachment(GetCapsuleComponent());
 	BodyProxy = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BodyProxy"));
@@ -35,6 +45,12 @@ ACombatCharacter::ACombatCharacter()
 	CombatInput = CreateDefaultSubobject<UCombatInputComponent>(TEXT("CombatInput"));
 	RewindHistory = CreateDefaultSubobject<URewindHistoryComponent>(TEXT("RewindHistory"));
 	WeaponClass = ACombatWeapon::StaticClass();
+}
+
+void ACombatCharacter::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	Presentation->ApplyAssets();
 }
 
 void ACombatCharacter::BeginPlay()
@@ -58,7 +74,6 @@ void ACombatCharacter::BeginPlay()
 			Weapon->WeaponData = FCombatRules::ResolveWeaponData(Weapon->WeaponData, CharacterData);
 			UGameplayStatics::FinishSpawningActor(Weapon, FirstPersonCamera->GetComponentTransform());
 			Weapon->AttachToComponent(FirstPersonCamera, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-			Weapon->SetActorRelativeLocation(FVector(35.f, 14.f, -12.f));
 			OnRep_Weapon();
 		}
 	}
@@ -93,6 +108,7 @@ void ACombatCharacter::OnRep_Weapon()
 	BoundWeapon = Weapon;
 	if (Weapon)
 	{
+		Weapon->Presentation->AttachToCharacter();
 		Weapon->Fire->OnStateChanged.AddUObject(this, &ACombatCharacter::HandleCombatStateChanged);
 		HandleCombatStateChanged(Weapon->Fire->GetCombatState());
 	}
@@ -107,10 +123,6 @@ void ACombatCharacter::HandleCombatStateChanged(ECombatState State)
 	StopJumping();
 	GetCharacterMovement()->DisableMovement();
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (Weapon)
-	{
-		Weapon->WeaponMesh->SetVisibility(false);
-	}
 }
 
 void ACombatCharacter::PossessedBy(AController* NewController)

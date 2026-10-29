@@ -80,3 +80,23 @@ bool FCombatRules::IsMatchActive(const UWorld* World)
 	const ACombatGameState* GS = World ? World->GetGameState<ACombatGameState>() : nullptr;
 	return !GS || !GS->bMatchEnded;
 }
+
+FVector FCombatRules::SanitizeVector(const FVector& Value, const FVector& Fallback, float MaxAbs)
+{
+	if (!FMath::IsFinite(Value.X) || !FMath::IsFinite(Value.Y) || !FMath::IsFinite(Value.Z))
+	{
+		return Fallback;
+	}
+	return FVector(FMath::Clamp(Value.X, -MaxAbs, MaxAbs), FMath::Clamp(Value.Y, -MaxAbs, MaxAbs),
+		FMath::Clamp(Value.Z, -MaxAbs, MaxAbs));
+}
+
+FRotator FCombatRules::SanitizeRotator(const FRotator& Value, const FRotator& Fallback)
+{
+	if (!FMath::IsFinite(Value.Pitch) || !FMath::IsFinite(Value.Yaw) || !FMath::IsFinite(Value.Roll))
+	{
+		return Fallback;
+	}
+	return FRotator(FRotator::NormalizeAxis(Value.Pitch), FRotator::NormalizeAxis(Value.Yaw),
+		FRotator::NormalizeAxis(Value.Roll));
+}

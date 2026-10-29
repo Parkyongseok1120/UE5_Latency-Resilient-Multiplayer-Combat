@@ -6,6 +6,8 @@
 #include "Data/CombatTypes.h"
 #include "UCharacterDataAsset.generated.h"
 
+class UAnimInstance;
+class USkeletalMesh;
 class UWeaponDataAsset;
 
 UCLASS()
@@ -24,7 +26,24 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character|Weapon")
 	TSoftObjectPtr<UWeaponDataAsset> DefaultWeapon;
 
-	// Optional: skeletal mesh / animation references
+	// Third-person character skeletal mesh and locomotion AnimBP
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character|Visual")
 	TSoftObjectPtr<USkeletalMesh> CharacterSkelMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character|Visual")
+	TSoftClassPtr<UAnimInstance> CharacterAnimClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character|Visual")
+	FVector MeshLocationOffset = FVector(0.f, 0.f, -90.f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character|Visual")
+	FRotator MeshRotationOffset = FRotator(0.f, -90.f, 0.f);
+
+	// Material vector parameter used for team coloring on skeletal/static body materials
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character|Visual")
+	FName TeamColorParameterName = TEXT("Paint Tint");
+
+	// Socket on the third-person character mesh where equipped weapons attach
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character|Visual")
+	FName WeaponAttachSocketName = TEXT("HandGrip_R");
 };

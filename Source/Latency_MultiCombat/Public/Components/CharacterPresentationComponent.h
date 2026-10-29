@@ -14,6 +14,8 @@ class LATENCY_MULTICOMBAT_API UCharacterPresentationComponent : public UActorCom
 	GENERATED_BODY()
 public:
 	UCharacterPresentationComponent();
+	void ApplyAssets();
+	bool UsesSkeletalBody() const { return bUsesSkeletalBody; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -21,13 +23,16 @@ protected:
 		float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* TickFunction) override;
 
 private:
+	void ApplyTeamVisuals(ETeamSide Team, bool bDead);
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> DefaultBodyMesh;
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> DefaultBodyMaterial;
 	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInstanceDynamic> BodyMaterial;
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> BodyMaterials;
+	FName ConfiguredColorParameter = TEXT("Paint Tint");
 	ETeamSide DisplayedTeam = ETeamSide::Neutral;
 	bool bDisplayedDead = false;
 	bool bHasDisplayedTeam = false;
+	bool bUsesSkeletalBody = false;
 };

@@ -6,8 +6,10 @@
 #include "CombatWeapon.generated.h"
 
 class ACombatCharacter;
-class UWeaponDataAsset;
+class USceneComponent;
+class USkeletalMeshComponent;
 class UStaticMeshComponent;
+class UWeaponDataAsset;
 class UWeaponFireComponent;
 class UWeaponAmmoComponent;
 class UWeaponPresentationComponent;
@@ -21,7 +23,15 @@ class LATENCY_MULTICOMBAT_API ACombatWeapon : public AActor
 public:
 	ACombatWeapon();
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
+	TObjectPtr<USceneComponent> WeaponRoot;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
+	TObjectPtr<USkeletalMeshComponent> FirstPersonMesh;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
+	TObjectPtr<USkeletalMeshComponent> ThirdPersonMesh;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
 	TObjectPtr<UStaticMeshComponent> WeaponMesh;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
+	TObjectPtr<UStaticMeshComponent> ThirdPersonStaticMesh;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
 	TObjectPtr<UWeaponFireComponent> Fire;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
@@ -35,6 +45,7 @@ public:
 	TObjectPtr<UWeaponDataAsset> WeaponData;
 	const FWeaponStats& GetStats() const { return Stats; }
 	ACombatCharacter* GetOwningCharacter() const;
+	virtual void OnRep_Owner() override;
 
 protected:
 	virtual void BeginPlay() override;

@@ -43,6 +43,7 @@ public:
 	FCharacterStats GetCharacterStats() const;
 	void Die(AController* Killer);
 	virtual FVector GetPawnViewLocation() const override;
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator,
 		AActor* DamageCauser) override;

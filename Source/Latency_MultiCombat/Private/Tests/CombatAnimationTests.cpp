@@ -6,9 +6,7 @@
 #include "Components/WeaponPresentationComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
-namespace
-{
-ACombatCharacter* SpawnAnimatedPlayer(FFPSBaselineTestWorld& Fixture, FAutomationTestBase& Test)
+static ACombatCharacter* SpawnAnimatedPlayer(FFPSBaselineTestWorld& Fixture, FAutomationTestBase& Test)
 {
 	UCharacterDataAsset* Data =
 		LoadObject<UCharacterDataAsset>(nullptr, TEXT("/Game/Data/DA_DefaultCharacter.DA_DefaultCharacter"));
@@ -30,7 +28,7 @@ ACombatCharacter* SpawnAnimatedPlayer(FFPSBaselineTestWorld& Fixture, FAutomatio
 	return Pawn;
 }
 
-float GripError(const ACombatCharacter* Pawn)
+static float GripError(const ACombatCharacter* Pawn)
 {
 	// World::Tick alone need not finalize a parallel pose before these test-side socket reads.
 	Pawn->GetMesh()->GetBoneSpaceTransforms();
@@ -39,7 +37,42 @@ float GripError(const ACombatCharacter* Pawn)
 		Weapon->ThirdPersonMesh->GetSocketTransform(Weapon->WeaponData->LeftHandGripSocketName);
 	return FVector::Distance(Pawn->GetMesh()->GetSocketLocation(TEXT("hand_l")), Grip.GetLocation());
 }
-} // namespace
+
+static float BarrelAimError(const ACombatCharacter* Pawn, const FRotator& View)
+{
+	Pawn->GetMesh()->GetBoneSpaceTransforms();
+	const FVector Barrel = Pawn->GetWeapon()->ThirdPersonMesh->GetSocketTransform(TEXT("Muzzle"))
+		.GetRotation().GetForwardVector();
+	return FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(Barrel, View.Vector()), -1.0, 1.0)));
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCombatViewDirectionTest, "LatencyCombat.Animation.ViewDirectionAlignment",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FCombatViewDirectionTest::RunTest(const FString& Parameters)
+{
+	FFPSBaselineTestWorld Fixture;
+	ACombatCharacter* Pawn = SpawnAnimatedPlayer(Fixture, *this);
+	if (!Pawn || !TestNotNull(TEXT("Animated player has a rifle"), Pawn->GetWeapon()))
+	{
+		return false;
+	}
+	ACombatPlayerController* PC = CastChecked<ACombatPlayerController>(Pawn->GetController());
+	for (const float Yaw : {0.f, 90.f, -135.f})
+	{
+		for (const float Pitch : {0.f, 60.f, -60.f})
+		{
+			const FRotator View(Pitch, Yaw, 0.f);
+			PC->SetControlRotation(View);
+			Pawn->FaceRotation(View, 0.f);
+			Fixture.Advance(0.6f);
+			const float Error = BarrelAimError(Pawn, View);
+			AddInfo(FString::Printf(TEXT("ViewPitch=%.0f ViewYaw=%.0f BarrelErrorDeg=%.3f"), Pitch, Yaw, Error));
+			TestTrue(TEXT("Rifle points along the view direction, including neutral aim"), Error < 2.f);
+			TestTrue(TEXT("Support hand stays on the aligned rifle"), GripError(Pawn) < 1.f);
+		}
+	}
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCombatAimAndGripTest, "LatencyCombat.Animation.AimAndSupportHand",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -128,6 +161,15 @@ bool FCombatReplicatedAimTest::RunTest(const FString& Parameters)
 	Fixture.Advance(0.4f);
 	TestTrue(TEXT("Extreme aim is clamped for the spine and neck"),
 		FMath::IsNearlyEqual(Anim->AimPitch, Anim->MaxAimPitch, 1.f));
+	Pawn->SetActorRotation(FRotator(0.f, 90.f, 0.f));
+	for (const float Pitch : {0.f, -60.f, 60.f})
+	{
+		Pawn->SetRemoteViewPitch(Pitch);
+		Fixture.Advance(0.6f);
+		const float Error = BarrelAimError(Pawn, FRotator(Pitch, 90.f, 0.f));
+		AddInfo(FString::Printf(TEXT("RemotePitch=%.0f BarrelErrorDeg=%.3f"), Pitch, Error));
+		TestTrue(TEXT("Controllerless replicated aim aligns the final rifle direction"), Error < 2.f);
+	}
 	return true;
 }
 

@@ -37,6 +37,11 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Combat|Aim", meta = (ClampMin = "0"))
 	float AimInterpolationSpeed = 12.f;
 
+	// Actor-space barrel direction in MF_Rifle_Idle_ADS with the default HandGrip_R attachment.
+	// Remove this authored bias before applying view pitch; tune when replacing the pose or weapon grip.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Combat|Aim")
+	FRotator ReferenceAimRotation = FRotator(11.886f, 8.224f, 0.f);
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Combat|Aim")
 	TArray<FCombatAimBone> AimBones;
 

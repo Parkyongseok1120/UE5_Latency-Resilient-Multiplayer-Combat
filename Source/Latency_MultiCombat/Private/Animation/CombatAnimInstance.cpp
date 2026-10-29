@@ -8,9 +8,7 @@
 #include "Engine/SkeletalMeshSocket.h"
 #include "TwoBoneIK.h"
 
-namespace
-{
-bool ResolveLeftHandGrip(const ACombatCharacter* Character, FName RightHandBone, FTransform& OutGrip)
+static bool ResolveLeftHandGrip(const ACombatCharacter* Character, FName RightHandBone, FTransform& OutGrip)
 {
 	const ACombatWeapon* Weapon = Character ? Character->GetWeapon() : nullptr;
 	const UWeaponDataAsset* Data = IsValid(Weapon) ? Weapon->WeaponData.Get() : nullptr;
@@ -43,13 +41,12 @@ bool ResolveLeftHandGrip(const ACombatCharacter* Character, FName RightHandBone,
 	return !OutGrip.ContainsNaN();
 }
 
-FCompactPoseBoneIndex FindBone(const FBoneContainer& Bones, FName Name)
+static FCompactPoseBoneIndex FindBone(const FBoneContainer& Bones, FName Name)
 {
 	const int32 Index = Bones.GetReferenceSkeleton().FindBoneIndex(Name);
 	return Index == INDEX_NONE ? FCompactPoseBoneIndex(INDEX_NONE)
 							   : Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(Index));
 }
-} // namespace
 
 struct FCombatAnimInstanceProxy : public FAnimInstanceProxy
 {
@@ -76,11 +73,16 @@ struct FCombatAnimInstanceProxy : public FAnimInstanceProxy
 		AimBones = Instance->AimBones;
 		RightHandBone = Instance->RightHandBone;
 		LeftHandBone = Instance->LeftHandBone;
+		AimCorrection = FQuat::Identity;
 		if (Character && Mesh)
 		{
-			PitchAxis = Mesh->GetComponentTransform()
-							.InverseTransformVectorNoScale(-Character->GetActorRightVector())
-							.GetSafeNormal();
+			const FQuat CharacterToMesh = Mesh->GetComponentQuat().Inverse() * Character->GetActorQuat();
+			const FQuat Reference = bAlive && Instance->bEnableAimIK && !Instance->ReferenceAimRotation.ContainsNaN()
+				? Instance->ReferenceAimRotation.Quaternion() : FQuat::Identity;
+			// Calibrate the authored neutral barrel before adding view pitch. Applying a camera pitch of
+			// zero to the uncorrected rifle pose still points its muzzle up and to the character's right.
+			AimCorrection = (CharacterToMesh * FRotator(SmoothedPitch, 0.f, 0.f).Quaternion() * Reference.Inverse() *
+				CharacterToMesh.Inverse()).GetNormalized();
 			ElbowHint = Mesh->GetComponentTransform().InverseTransformVectorNoScale(
 				Character->GetActorTransform().TransformVectorNoScale(Instance->LeftElbowHintOffset));
 		}
@@ -99,7 +101,7 @@ struct FCombatAnimInstanceProxy : public FAnimInstanceProxy
 	{
 		// Preserve the complete AnimBP graph, including its montage slot and foot IK.
 		EvaluateAnimationNode(Output);
-		if (FMath::IsNearlyZero(SmoothedPitch) && IKAlpha < ZERO_ANIMWEIGHT_THRESH)
+		if (AimCorrection.IsIdentity() && IKAlpha < ZERO_ANIMWEIGHT_THRESH)
 		{
 			return true;
 		}
@@ -119,9 +121,8 @@ struct FCombatAnimInstanceProxy : public FAnimInstanceProxy
 		for (const auto& Bone : Rotations)
 		{
 			FTransform Transform = Pose.GetComponentSpaceTransform(Bone.Key);
-			Transform.SetRotation(
-				(FQuat(PitchAxis, FMath::DegreesToRadians(SmoothedPitch * Bone.Value)) * Transform.GetRotation())
-					.GetNormalized());
+			Transform.SetRotation((FQuat::Slerp(FQuat::Identity, AimCorrection, Bone.Value) * Transform.GetRotation())
+				.GetNormalized());
 			const FBoneTransform Change(Bone.Key, Transform);
 			Pose.LocalBlendCSBoneTransforms(MakeArrayView(&Change, 1), 1.f);
 		}
@@ -138,8 +139,7 @@ struct FCombatAnimInstanceProxy : public FAnimInstanceProxy
 			FTransform Upper = Pose.GetComponentSpaceTransform(Shoulder);
 			FTransform Lower = Pose.GetComponentSpaceTransform(Elbow);
 			FTransform End = Pose.GetComponentSpaceTransform(Hand);
-			const FVector Pole =
-				Upper.GetLocation() + FQuat(PitchAxis, FMath::DegreesToRadians(SmoothedPitch)).RotateVector(ElbowHint);
+			const FVector Pole = Upper.GetLocation() + AimCorrection.RotateVector(ElbowHint);
 			AnimationCore::SolveTwoBoneIK(Upper, Lower, End, Pole, Target.GetLocation(), false, 1.0, 1.0);
 			End.SetRotation(Target.GetRotation());
 			const FBoneTransform Changes[] = {
@@ -153,7 +153,7 @@ struct FCombatAnimInstanceProxy : public FAnimInstanceProxy
 	TArray<FCombatAimBone> AimBones;
 	FName RightHandBone;
 	FName LeftHandBone;
-	FVector PitchAxis = FVector::ForwardVector;
+	FQuat AimCorrection = FQuat::Identity;
 	FVector ElbowHint = FVector::ZeroVector;
 	FTransform GripInRightHand = FTransform::Identity;
 	float SmoothedPitch = 0.f;

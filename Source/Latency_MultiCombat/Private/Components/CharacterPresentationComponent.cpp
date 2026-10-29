@@ -1,4 +1,5 @@
 #include "Components/CharacterPresentationComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "CombatCharacter.h"
 #include "CombatPlayerState.h"
 #include "CombatWeapon.h"
@@ -8,6 +9,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/CombatFirstPersonAnimInstance.h"
+#include "Engine/SkeletalMesh.h"
 #include "Data/CombatRules.h"
 #include "Data/UCharacterDataAsset.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -16,11 +19,16 @@
 UCharacterPresentationComponent::UCharacterPresentationComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Mesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Material(
 		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	DefaultBodyMesh = Mesh.Object;
 	DefaultBodyMaterial = Material.Object;
+	static ConstructorHelpers::FObjectFinderOptional<USkeletalMesh> ArmsMesh(
+		TEXT("/Game/Characters/Mannequins/Meshes/SKM_CombatArms_Closed.SKM_CombatArms_Closed"),
+		LOAD_NoWarn | LOAD_Quiet);
+	FirstPersonArmMesh = ArmsMesh.Get();
 }
 
 void UCharacterPresentationComponent::BeginPlay()
@@ -43,6 +51,14 @@ void UCharacterPresentationComponent::BeginPlay()
 			{
 				if (UMaterialInstanceDynamic* DynamicMat =
 						Character->GetMesh()->CreateDynamicMaterialInstance(SlotIndex))
+				{
+					BodyMaterials.Add(DynamicMat);
+				}
+			}
+			for (int32 SlotIndex = 0; SlotIndex < Character->FirstPersonArms->GetNumMaterials(); ++SlotIndex)
+			{
+				if (UMaterialInstanceDynamic* DynamicMat =
+						Character->FirstPersonArms->CreateDynamicMaterialInstance(SlotIndex))
 				{
 					BodyMaterials.Add(DynamicMat);
 				}
@@ -72,7 +88,7 @@ void UCharacterPresentationComponent::ApplyAssets()
 	{
 		return;
 	}
-	Character->FirstPersonCamera->SetRelativeLocation(FVector(0.f, 0.f, 64.f));
+	Character->FirstPersonCamera->SetRelativeLocation(FVector(0.f, 0.f, 76.f));
 	Character->FirstPersonCamera->bUsePawnControlRotation = true;
 	Character->FirstPersonCamera->SetFieldOfView(90.f);
 
@@ -126,12 +142,53 @@ void UCharacterPresentationComponent::ApplyAssets()
 		CharacterMesh->SetSkeletalMesh(nullptr);
 		CharacterMesh->SetVisibility(false);
 	}
+	USkeletalMeshComponent* Arms = Character->FirstPersonArms;
+	const bool bCompatibleArms = CharacterMesh->GetSkeletalMeshAsset() && FirstPersonArmMesh &&
+		CharacterMesh->GetSkeletalMeshAsset()->GetSkeleton() == FirstPersonArmMesh->GetSkeleton();
+	Arms->SetSkeletalMesh(GetNetMode() != NM_DedicatedServer && bCompatibleArms ? FirstPersonArmMesh.Get() : nullptr);
+	Arms->SetAnimInstanceClass(UCombatFirstPersonAnimInstance::StaticClass());
+	Arms->AddTickPrerequisiteComponent(CharacterMesh);
+	// The derived asset contains arm geometry only, with the original full skeleton and finger poses.
+	Arms->SetVisibility(false);
+}
+
+void UCharacterPresentationComponent::UpdateFirstPersonArms()
+{
+	ACombatCharacter* Character = Cast<ACombatCharacter>(GetOwner());
+	ACombatWeapon* Weapon = Character ? Character->GetWeapon() : nullptr;
+	if (!Character)
+	{
+		return;
+	}
+	USkeletalMeshComponent* Arms = Character->FirstPersonArms;
+	const bool bShow = GetNetMode() != NM_DedicatedServer && Character->IsLocallyControlled() &&
+		Character->GetCombatState() != ECombatState::Dead && Weapon && Weapon->Presentation->UsesSkeletalWeapon() &&
+		Arms->GetSkeletalMeshAsset() && Weapon->ThirdPersonMesh->GetAttachParent() == Character->GetMesh();
+	Arms->SetVisibility(bShow);
+	if (!bShow)
+	{
+		return;
+	}
+	USkeletalMeshComponent* Body = Character->GetMesh();
+	// The owner's world body is hidden, but still supplies the view arms' animated hand pose.
+	Body->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	Arms->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	Body->GetBoneSpaceTransforms();
+	const FName GripSocket = Weapon->ThirdPersonMesh->GetAttachSocketName();
+	const FTransform GripInBody = Body->GetSocketTransform(GripSocket, RTS_Component);
+	const FTransform ArmsWorld = GripInBody.Inverse() * Weapon->ThirdPersonMesh->GetRelativeTransform().Inverse() *
+		Weapon->FirstPersonMesh->GetComponentTransform();
+	if (!ArmsWorld.ContainsNaN())
+	{
+		Arms->SetWorldTransform(ArmsWorld);
+	}
 }
 
 void UCharacterPresentationComponent::TickComponent(
 	float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* TickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, TickFunction);
+	UpdateFirstPersonArms();
 	const ACombatCharacter* Character = Cast<ACombatCharacter>(GetOwner());
 	if (!Character)
 	{
@@ -167,6 +224,10 @@ void UCharacterPresentationComponent::ApplyTeamVisuals(ETeamSide Team, bool bDea
 	{
 		Character->GetMesh()->bPauseAnims = bDead;
 	}
+	if (bDead)
+	{
+		StartDeathRagdoll();
+	}
 
 	const FLinearColor Color = bDead ? FLinearColor(0.15f, 0.15f, 0.15f)
 		: Team == ETeamSide::Red	 ? FLinearColor(0.85f, 0.08f, 0.08f)
@@ -188,4 +249,33 @@ void UCharacterPresentationComponent::ApplyTeamVisuals(ETeamSide Team, bool bDea
 		Mat->SetVectorParameterValue(TEXT("Color"), Color);
 		Mat->SetVectorParameterValue(TEXT("BaseColor"), Color);
 	}
+}
+
+void UCharacterPresentationComponent::StartDeathRagdoll()
+{
+	ACombatCharacter* Character = Cast<ACombatCharacter>(GetOwner());
+	if (bRagdollActive || !Character || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+	USkeletalMeshComponent* Mesh = Character->GetMesh();
+	if (!Mesh->GetSkeletalMeshAsset() || !Mesh->GetPhysicsAsset())
+	{
+		return;
+	}
+	bRagdollActive = true;
+	const FVector InheritedVelocity = Character->GetVelocity();
+	Character->GetCharacterMovement()->StopMovementImmediately();
+	Mesh->bPauseAnims = true;
+	Mesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	Mesh->SetCollisionProfileName(TEXT("Ragdoll"));
+	// Corpses collide with the level, never with player capsules or authoritative traces.
+	Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	Mesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+	Mesh->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+	Mesh->SetAllBodiesSimulatePhysics(true);
+	Mesh->SetSimulatePhysics(true);
+	Mesh->SetPhysicsLinearVelocity(InheritedVelocity);
+	Mesh->AddImpulse((-Character->GetActorForwardVector() * 90.f + FVector(0.f, 0.f, 35.f)), TEXT("pelvis"), true);
+	Mesh->WakeAllRigidBodies();
 }

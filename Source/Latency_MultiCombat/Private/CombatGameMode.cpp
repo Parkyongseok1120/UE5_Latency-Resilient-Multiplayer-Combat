@@ -38,6 +38,7 @@ void ACombatGameMode::BeginPlay()
 			State->LagCompensation.bEnabled = false;
 		}
 		State->ForceNetUpdate();
+		State->InitializeExperiment();
 	}
 	UE_LOG(LogTemp, Display, TEXT("[DM] Server-authoritative FPS baseline started. TeamSize=%d"), TeamSize);
 }

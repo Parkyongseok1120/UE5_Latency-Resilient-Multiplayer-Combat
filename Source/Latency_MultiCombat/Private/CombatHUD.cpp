@@ -8,9 +8,82 @@
 #include "Components/CombatTimeSyncComponent.h"
 #include "Components/HealthComponent.h"
 #include "Components/WeaponAmmoComponent.h"
+#include "Components/WeaponFireComponent.h"
 #include "Components/WeaponPresentationComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/World.h"
+#include "Engine/Font.h"
+#include "Engine/FontFace.h"
+#include "UObject/ConstructorHelpers.h"
+
+ACombatHUD::ACombatHUD()
+{
+	static ConstructorHelpers::FObjectFinder<UFontFace> Regular(
+		TEXT("/Game/UI/Fonts/FF_NanumSquareNeo_Regular.FF_NanumSquareNeo_Regular"));
+	static ConstructorHelpers::FObjectFinder<UFontFace> Bold(
+		TEXT("/Game/UI/Fonts/FF_NanumSquareNeo_Bold.FF_NanumSquareNeo_Bold"));
+	BodyFontFace = Regular.Object;
+	HeadingFontFace = Bold.Object;
+}
+
+void ACombatHUD::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+	BodyFont = CreateUIFont(BodyFontFace, TEXT("Regular"));
+	HeadingFont = CreateUIFont(HeadingFontFace, TEXT("Bold"));
+}
+
+UFont* ACombatHUD::CreateUIFont(UFontFace* Face, FName TypefaceName)
+{
+	if (!Face)
+	{
+		return nullptr;
+	}
+	UFont* Font = NewObject<UFont>(this);
+	Font->FontCacheType = EFontCacheType::Runtime;
+	Font->LegacyFontSize = 12;
+	Font->LegacyFontName = TypefaceName;
+	FTypefaceEntry& Entry = Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.AddDefaulted_GetRef();
+	Entry.Name = TypefaceName;
+	Entry.Font = FFontData(Face);
+	return Font;
+}
+
+void ACombatHUD::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	const ACombatPlayerController* PC = Cast<ACombatPlayerController>(PlayerOwner);
+	const float Target = PC && PC->IsExperimentPanelOpen() ? 1.f : 0.f;
+	// Constant progress gives a 0.25s transition; the easing curve is applied only when drawing.
+	PanelSlideProgress = FMath::FInterpConstantTo(PanelSlideProgress, Target, DeltaSeconds, 4.f);
+}
+
+bool ACombatHUD::CanInteractWithExperimentPanel() const
+{
+	const ACombatPlayerController* PC = Cast<ACombatPlayerController>(PlayerOwner);
+	return PC && PC->bShowMouseCursor && PC->IsExperimentPanelOpen() && PanelSlideProgress >= 1.f;
+}
+
+void ACombatHUD::DrawUIText(
+	const FString& Text, FLinearColor Color, float X, float Y, float Scale, bool bHeading, float MaxWidth)
+{
+	if (!Canvas)
+	{
+		return;
+	}
+	UFont* Font = bHeading && HeadingFont ? HeadingFont.Get() : BodyFont.Get();
+	float Width = 0.f;
+	float Height = 0.f;
+	Canvas->StrLen(Font, Text, Width, Height);
+	// Keep text at its normal size while the panel moves beyond the viewport edge.
+	const float RightEdge = PanelTextRightEdge > 0.f ? PanelTextRightEdge : Canvas->ClipX - 14.f;
+	const float Available = MaxWidth > 0.f ? MaxWidth : RightEdge - X;
+	if (Width > 0.f && Available > 0.f)
+	{
+		Scale = FMath::Min(Scale, Available / Width);
+	}
+	DrawText(Text, Color, X, Y, Font, Scale);
+}
 
 void ACombatHUD::DrawHUD()
 {
@@ -26,16 +99,51 @@ void ACombatHUD::DrawHUD()
 	const UCombatTelemetryComponent* Telemetry = PC ? PC->Telemetry.Get() : nullptr;
 
 	const float Margin = 14.f;
-	const float PanelW = FMath::Clamp(Canvas->ClipX * 0.30f, 285.f, 380.f);
-	const float PanelX = Canvas->ClipX - PanelW - Margin;
-	const float LeftLimitWidth = FMath::Max(260.f, PanelX - Margin * 2.f);
+	const float PanelW = FMath::Min(FMath::Clamp(Canvas->ClipX * 0.32f, 300.f, 410.f), Canvas->ClipX * 0.46f);
+	const float OpenX = Canvas->ClipX - PanelW - Margin;
+	const float Slide = FMath::SmoothStep(0.f, 1.f, PanelSlideProgress);
+	const float PanelX = FMath::Lerp(Canvas->ClipX + Margin, OpenX, Slide);
+	const float LeftLimitWidth =
+		FMath::Max(260.f, FMath::Lerp(Canvas->ClipX - Margin * 2.f, OpenX - Margin * 2.f, Slide));
 
-	DrawGameplayHUD(PS, Character, GS, LeftLimitWidth);
-	DrawRightTelemetryPanel(PC, GS, Telemetry, PanelX, PanelW);
+	DrawGameplayHUD(PS, Character, GS, LeftLimitWidth, FMath::Max(260.f, OpenX - Margin * 2.f));
+	if (PanelSlideProgress > 0.f)
+	{
+		PanelTextRightEdge = PanelX + PanelW - 14.f;
+		DrawRightTelemetryPanel(PC, GS, Telemetry, PanelX, PanelW);
+		PanelTextRightEdge = 0.f;
+	}
+	else
+	{
+		DrawTelemetrySummary(PC, GS, Telemetry, OpenX, PanelW);
+	}
+}
+
+void ACombatHUD::DrawTelemetrySummary(const ACombatPlayerController* PC, const ACombatGameState* GS,
+	const UCombatTelemetryComponent* Telemetry, float PanelX, float PanelW)
+{
+	const FCombatTelemetrySummary Summary = Telemetry ? Telemetry->GetSummary() : FCombatTelemetrySummary();
+	const FLinearColor Muted(0.70f, 0.77f, 0.84f);
+	DrawRect(FLinearColor(0.02f, 0.04f, 0.08f, 0.78f), PanelX, 14.f, PanelW, 78.f);
+	DrawUIText(TEXT("현재 상태"), FLinearColor(0.4f, 0.9f, 1.f), PanelX + 8.f, 19.f, 0.85f, true);
+	DrawUIText(TEXT("Tab 상세 보기"), Muted, PanelX + PanelW - 100.f, 20.f, 0.72f);
+	DrawUIText(FString::Printf(TEXT("왕복 %.0fms | %.0f 프레임/초"), Summary.CurrentRttMs, Summary.CurrentFps),
+		FLinearColor::White, PanelX + 8.f, 42.f, 0.85f);
+	FString State = FString::Printf(TEXT("리와인드 %s | 편도 지연 %dms"),
+		GS && GS->LagCompensation.bEnabled ? TEXT("켜짐") : TEXT("꺼짐"), GS ? GS->Experiment.PacketLagMs : 0);
+	if (PC && PC->IsExperimentRequestPending())
+	{
+		State += TEXT(" · 적용 중");
+	}
+	else if (Telemetry && !Telemetry->IsMeasuring())
+	{
+		State += TEXT(" · 안정화 중");
+	}
+	DrawUIText(State, Muted, PanelX + 8.f, 65.f, 0.75f);
 }
 
 void ACombatHUD::DrawGameplayHUD(const ACombatPlayerState* PS, const ACombatCharacter* Character,
-	const ACombatGameState* GS, float LeftLimitWidth)
+	const ACombatGameState* GS, float LeftLimitWidth, float TopLimitWidth)
 {
 	const float CX = Canvas->ClipX * 0.5f;
 	const float CY = Canvas->ClipY * 0.5f;
@@ -43,18 +151,18 @@ void ACombatHUD::DrawGameplayHUD(const ACombatPlayerState* PS, const ACombatChar
 
 	// 좌하단 로컬 플레이어 상태 박스 (오른쪽 텔레메트리 패널과 겹치지 않도록 좌하단 폭으로 제한)
 	const float BottomBoxW = FMath::Min(530.f, LeftLimitWidth);
-	const float BottomBoxH = 92.f;
+	const float BottomBoxH = 104.f;
 	const float BottomBoxY = Canvas->ClipY - BottomBoxH - Margin;
 	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.62f), Margin, BottomBoxY, BottomBoxW, BottomBoxH);
 
 	// 상단 중앙 팀 점수 박스
 	const float ScoreBoxW = 310.f;
-	const float ScoreBoxX = FMath::Min(CX - ScoreBoxW * 0.5f, LeftLimitWidth + Margin - ScoreBoxW);
+	const float ScoreBoxX = FMath::Min(CX - ScoreBoxW * 0.5f, TopLimitWidth + Margin - ScoreBoxW);
 	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.62f), FMath::Max(Margin, ScoreBoxX), Margin, ScoreBoxW, 34.f);
 
 	if (GS)
 	{
-		const float RosterW = FMath::Min(390.f, LeftLimitWidth);
+		const float RosterW = FMath::Min(390.f, TopLimitWidth);
 		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.50f), Margin, 58.f, RosterW, GS->PlayerArray.Num() * 20.f + 14.f);
 	}
 
@@ -62,22 +170,24 @@ void ACombatHUD::DrawGameplayHUD(const ACombatPlayerState* PS, const ACombatChar
 	{
 		const FLinearColor TeamColor =
 			PS->Team == ETeamSide::Red ? FLinearColor(1.f, 0.28f, 0.28f) : FLinearColor(0.32f, 0.62f, 1.f);
-		DrawText(FString::Printf(TEXT("%s   HP %.0f / %.0f   Armor %.0f   K/D %d/%d"),
-					 PS->Team == ETeamSide::Red ? TEXT("RED") : TEXT("BLUE"), PS->Health->GetHealth(),
-					 PS->Health->GetMaxHealth(), PS->Health->GetArmor(), PS->KillCount, PS->DeathCount),
-			TeamColor, Margin + 14.f, BottomBoxY + 10.f, nullptr, 1.18f);
+		DrawUIText(FString::Printf(TEXT("%s | 체력 %.0f/%.0f | 방어 %.0f"),
+					   PS->Team == ETeamSide::Red ? TEXT("레드팀") : TEXT("블루팀"), PS->Health->GetHealth(),
+					   PS->Health->GetMaxHealth(), PS->Health->GetArmor()),
+			TeamColor, Margin + 14.f, BottomBoxY + 8.f, 1.f, true, BottomBoxW - 28.f);
 		if (PS->Health->IsDead())
 		{
-			DrawText(TEXT("Eliminated - respawning..."), FLinearColor::Red, CX - 115.f, CY + 40.f);
+			DrawUIText(TEXT("사망했습니다 · 재생성 대기 중"), FLinearColor::Red, CX - 115.f, CY + 40.f);
 		}
 	}
 
 	if (Character && Character->GetWeapon())
 	{
-		DrawText(FString::Printf(TEXT("AMMO  %d / %d%s"), Character->GetWeapon()->Ammo->GetMagazineAmmo(),
-					 Character->GetWeapon()->Ammo->GetReserveAmmo(),
-					 Character->GetCombatState() == ECombatState::Reloading ? TEXT("   RELOADING") : TEXT("")),
-			FLinearColor::White, Margin + 14.f, BottomBoxY + 38.f, nullptr, 1.18f);
+		DrawUIText(FString::Printf(TEXT("탄약 %d / %d · %s%s | 처치 %d / 사망 %d"),
+					   Character->GetWeapon()->Ammo->GetMagazineAmmo(), Character->GetWeapon()->Ammo->GetReserveAmmo(),
+					   Character->GetWeapon()->Fire->IsAutomaticFire() ? TEXT("연사") : TEXT("단발"),
+					   Character->GetCombatState() == ECombatState::Reloading ? TEXT("   재장전 중") : TEXT(""),
+					   PS ? PS->KillCount : 0, PS ? PS->DeathCount : 0),
+			FLinearColor::White, Margin + 14.f, BottomBoxY + 34.f, 0.95f, false, BottomBoxW - 28.f);
 		if (Character->GetCombatState() != ECombatState::Dead)
 		{
 			DrawLine(CX - 12.f, CY, CX - 4.f, CY, FLinearColor::White, 1.5f);
@@ -96,130 +206,204 @@ void ACombatHUD::DrawGameplayHUD(const ACombatPlayerState* PS, const ACombatChar
 	if (GS)
 	{
 		const float ScoreTextX = FMath::Max(Margin + 14.f, ScoreBoxX + 16.f);
-		DrawText(FString::Printf(
-					 TEXT("RED %d  :  %d BLUE   /   %d to win"), GS->RedTeamScore, GS->BlueTeamScore, GS->ScoreToWin),
-			FLinearColor::White, ScoreTextX, Margin + 8.f, nullptr, 1.15f);
+		DrawUIText(FString::Printf(
+					   TEXT("레드 %d : %d 블루  /  %d점 승리"), GS->RedTeamScore, GS->BlueTeamScore, GS->ScoreToWin),
+			FLinearColor::White, ScoreTextX, Margin + 8.f, 1.f, true, ScoreBoxW - 32.f);
 		if (GS->bMatchEnded)
 		{
-			DrawText(GS->WinningTeam == ETeamSide::Red ? TEXT("RED TEAM WINS") : TEXT("BLUE TEAM WINS"),
-				FLinearColor::Yellow, CX - 130.f, CY - 70.f, nullptr, 1.5f);
+			DrawUIText(GS->WinningTeam == ETeamSide::Red ? TEXT("레드팀 승리") : TEXT("블루팀 승리"),
+				FLinearColor::Yellow, CX - 100.f, CY - 70.f, 1.5f, true);
 		}
 		float Y = 66.f;
 		for (APlayerState* Player : GS->PlayerArray)
 		{
 			if (const ACombatPlayerState* Other = Cast<ACombatPlayerState>(Player))
 			{
-				DrawText(FString::Printf(TEXT("%s  %s   HP %.0f  K/D %d/%d%s"),
-							 Other->Team == ETeamSide::Red ? TEXT("R") : TEXT("B"), *Other->GetPlayerName(),
-							 Other->Health->GetHealth(), Other->KillCount, Other->DeathCount,
-							 Other->Health->IsDead() ? TEXT(" DEAD") : TEXT("")),
-					FLinearColor::White, Margin + 12.f, Y, nullptr, 0.95f);
+				DrawUIText(FString::Printf(TEXT("%s  %s  체력 %.0f  처치/사망 %d/%d%s"),
+							   Other->Team == ETeamSide::Red ? TEXT("레드") : TEXT("블루"), *Other->GetPlayerName(),
+							   Other->Health->GetHealth(), Other->KillCount, Other->DeathCount,
+							   Other->Health->IsDead() ? TEXT(" 사망") : TEXT("")),
+					FLinearColor::White, Margin + 12.f, Y, 0.80f, false, FMath::Min(390.f, TopLimitWidth) - 24.f);
 				Y += 20.f;
 			}
 		}
 	}
 
-	DrawText(TEXT("WASD Move | Mouse Aim | LMB Fire | RMB ADS | R Reload | Space Jump"),
-		FLinearColor(0.72f, 0.72f, 0.72f), Margin + 14.f, BottomBoxY + 68.f, nullptr, 0.88f);
+	DrawUIText(TEXT("WASD 이동 · 마우스 조준 · Space 점프"), FLinearColor(0.72f, 0.72f, 0.72f), Margin + 14.f,
+		BottomBoxY + 62.f, 0.75f, false, BottomBoxW - 28.f);
+	DrawUIText(TEXT("좌클릭 발사 · 우클릭 정조준 · R 재장전 · B 단발/연사"), FLinearColor(0.72f, 0.72f, 0.72f),
+		Margin + 14.f, BottomBoxY + 80.f, 0.75f, false, BottomBoxW - 28.f);
+}
+
+void ACombatHUD::DrawExperimentButton(
+	FName Name, const FString& Label, float X, float Y, float W, bool bSelected, bool bEnabled)
+{
+	const FLinearColor Color =
+		bSelected ? FLinearColor(0.08f, 0.39f, 0.50f, 0.95f) : FLinearColor(0.10f, 0.14f, 0.20f, 0.95f);
+	DrawRect(Color, X, Y, W, 21.f);
+	DrawUIText(Label, bEnabled ? FLinearColor::White : FLinearColor(0.45f, 0.48f, 0.52f), X + 7.f, Y + 3.f, 0.80f,
+		false, W - 14.f);
+	if (bEnabled && CanInteractWithExperimentPanel())
+	{
+		AddHitBox(FVector2D(X, Y), FVector2D(W, 21.f), Name, true);
+	}
+}
+
+void ACombatHUD::DrawMetricRow(
+	const TCHAR* Label, const FCombatMetricStats& Stats, float X, float Y, float W, FLinearColor Color)
+{
+	DrawUIText(Label, Color, X + 8.f, Y, 0.80f, false, 82.f);
+	const float ColumnW = (W - 96.f) / 4.f;
+	const float Values[] = {Stats.Current, Stats.Average(), Stats.Minimum, Stats.Maximum};
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		DrawUIText(Stats.Count > 0 ? FString::Printf(TEXT("%.1f"), Values[Index]) : TEXT("--"), FLinearColor::White,
+			X + 96.f + Index * ColumnW, Y, 0.80f, false, ColumnW - 3.f);
+	}
+}
+
+void ACombatHUD::NotifyHitBoxClick(FName BoxName)
+{
+	Super::NotifyHitBoxClick(BoxName);
+	ACombatPlayerController* PC = Cast<ACombatPlayerController>(PlayerOwner);
+	const ACombatGameState* GS = GetWorld()->GetGameState<ACombatGameState>();
+	if (!PC || !GS || !CanInteractWithExperimentPanel())
+	{
+		return;
+	}
+	if (BoxName == TEXT("RewindOn") || BoxName == TEXT("RewindOff"))
+	{
+		const bool bEnabled = BoxName == TEXT("RewindOn");
+		if (bEnabled != GS->LagCompensation.bEnabled)
+		{
+			PC->RequestExperiment(bEnabled, GS->Experiment.PacketLagMs);
+		}
+	}
+	else if (BoxName == TEXT("ResetExperiment"))
+	{
+		PC->ResetExperimentMetrics();
+	}
+	else
+	{
+		for (const int32 Lag : {0, 50, 100, 150, 200})
+		{
+			if (BoxName == FName(*FString::Printf(TEXT("Lag%d"), Lag)))
+			{
+				if (Lag != GS->Experiment.PacketLagMs)
+				{
+					PC->RequestExperiment(GS->LagCompensation.bEnabled, Lag);
+				}
+				break;
+			}
+		}
+	}
 }
 
 void ACombatHUD::DrawRightTelemetryPanel(const ACombatPlayerController* PC, const ACombatGameState* GS,
 	const UCombatTelemetryComponent* Telemetry, float PanelX, float PanelW)
 {
-	const float TopMargin = 14.f;
-	const float Gap = 6.f;
-	const float AvailableH = FMath::Max(420.f, Canvas->ClipY - TopMargin * 2.f);
-
-	const float StatusH = 104.f;
-	const float SummaryH = 100.f;
-	const float GraphsTotalH = FMath::Clamp(AvailableH - StatusH - SummaryH - Gap * 3.f, 190.f, 340.f);
-	const float NetGraphH = GraphsTotalH * 0.48f;
-	const float ShotChartH = GraphsTotalH - NetGraphH;
-
-	const FLagCompensationSettings LagSettings = GS ? GS->LagCompensation : FLagCompensationSettings();
+	const float Gap = 5.f;
+	const float HeaderH = 42.f;
+	const float ControlsH = 90.f;
+	const float StatsH = 158.f;
+	const float SummaryH = 64.f;
+	const float GraphsH = FMath::Max(110.f, Canvas->ClipY - 28.f - HeaderH - ControlsH - StatsH - SummaryH - Gap * 5.f);
+	const float NetH = GraphsH * 0.46f;
+	const FLinearColor Background(0.02f, 0.04f, 0.08f, 0.82f);
+	const FLinearColor Cyan(0.4f, 0.9f, 1.f);
+	const FLinearColor Muted(0.65f, 0.72f, 0.80f);
 	const FCombatTelemetrySummary Summary = Telemetry ? Telemetry->GetSummary() : FCombatTelemetrySummary();
-	const UCombatTimeSyncComponent* TimeSync = PC ? PC->TimeSync.Get() : nullptr;
-	const bool bSynced = TimeSync && TimeSync->IsReady();
-	const double EstServerTime = TimeSync ? TimeSync->GetServerTime() : GetWorld()->GetTimeSeconds();
+	const bool bPending = PC && PC->IsExperimentRequestPending();
+	const bool bEnabled = GS && ACombatGameState::SupportsLiveExperiments() && !bPending;
+	const bool bRewind = GS && GS->LagCompensation.bEnabled;
+	const int32 Lag = GS ? GS->Experiment.PacketLagMs : 0;
+	float Y = 14.f;
+	DrawRect(Background, PanelX, Y, PanelW, HeaderH);
+	DrawUIText(TEXT("실시간 실험 지표"), Cyan, PanelX + 8.f, Y + 4.f, 0.90f, true);
+	DrawUIText(TEXT("Tab 접기"), Muted, PanelX + PanelW - 75.f, Y + 7.f, 0.72f);
+	DrawUIText(
+		FString::Printf(TEXT("%s | %s | 측정 구간 %u"), GetNetModeLabel(),
+			PC && PC->TimeSync->IsReady() ? TEXT("동기화 완료") : TEXT("동기화 중"), GS ? GS->Experiment.Revision : 0),
+		Muted, PanelX + 8.f, Y + 25.f, 0.70f);
 
-	// 1. 서버 & 네트워크 상태 수치 박스
-	float CurY = TopMargin;
-	DrawRect(FLinearColor(0.02f, 0.04f, 0.08f, 0.74f), PanelX, CurY, PanelW, StatusH);
-	DrawLine(PanelX, CurY, PanelX + PanelW, CurY, FLinearColor(0.2f, 0.65f, 0.95f, 0.9f), 1.5f);
-
-	DrawText(TEXT("SERVER & LAG COMPENSATION"), FLinearColor(0.55f, 0.85f, 1.f), PanelX + 10.f, CurY + 6.f, nullptr,
-		0.95f);
-	const FLinearColor BadgeColor =
-		LagSettings.bEnabled ? FLinearColor(0.15f, 0.9f, 0.35f) : FLinearColor(1.f, 0.55f, 0.15f);
-	DrawText(LagSettings.bEnabled ? TEXT("[REWIND ON]") : TEXT("[REWIND OFF]"), BadgeColor, PanelX + PanelW - 98.f,
-		CurY + 6.f, nullptr, 0.92f);
-
-	DrawText(FString::Printf(TEXT("Mode: %s  |  Clock: %s (%.1fs)"), GetNetModeLabel(),
-				 bSynced ? TEXT("SYNCED") : TEXT("SYNCING"), EstServerTime),
-		FLinearColor::White, PanelX + 10.f, CurY + 28.f, nullptr, 0.88f);
-
-	DrawText(FString::Printf(TEXT("RTT: %.1f ms (Peak %.1f)  |  Ping: %.0f ms"), Summary.CurrentRttMs,
-				 Summary.PeakRttMs, Summary.CurrentPingMs),
-		FLinearColor(0.35f, 0.92f, 1.f), PanelX + 10.f, CurY + 47.f, nullptr, 0.88f);
-
-	DrawText(FString::Printf(TEXT("FPS: %.1f (%.2f ms)"), Summary.CurrentFps, Summary.CurrentFrameMs),
-		FLinearColor(1.f, 0.9f, 0.35f), PanelX + 10.f, CurY + 66.f, nullptr, 0.88f);
-
-	DrawText(FString::Printf(TEXT("MaxRewind %.0fms | ViewCap %.0fms | Smooth %.0fms"),
-				 LagSettings.MaxRewindSeconds * 1000.f, LagSettings.MaxTargetViewDelay * 1000.f,
-				 LagSettings.DisplayDelaySeconds * 1000.f),
-		FLinearColor(0.75f, 0.78f, 0.82f), PanelX + 10.f, CurY + 84.f, nullptr, 0.82f);
-
-	// 2. 실시간 RTT & Frame Time 시계열 선 그래프
-	CurY += StatusH + Gap;
-	DrawNetGraphBox(Telemetry, PanelX, CurY, PanelW, NetGraphH);
-
-	// 3. 최근 발사별 응답 지연 & 리와인드 막대 차트
-	CurY += NetGraphH + Gap;
-	DrawShotChartBox(Telemetry, LagSettings.MaxRewindSeconds * 1000.f, PanelX, CurY, PanelW, ShotChartH);
-
-	// 4. 누적 사격 통계 & 마지막 발사 상세 수치
-	CurY += ShotChartH + Gap;
-	DrawRect(FLinearColor(0.02f, 0.04f, 0.08f, 0.74f), PanelX, CurY, PanelW, SummaryH);
-	DrawLine(PanelX, CurY, PanelX + PanelW, CurY, FLinearColor(0.2f, 0.85f, 0.55f, 0.85f), 1.2f);
-
-	const float HitRate =
-		Summary.TotalAccepted > 0 ? (static_cast<float>(Summary.TotalHits) / Summary.TotalAccepted) * 100.f : 0.f;
-	DrawText(TEXT("COMBAT SHOT TELEMETRY"), FLinearColor(0.45f, 0.95f, 0.65f), PanelX + 10.f, CurY + 6.f, nullptr,
-		0.95f);
-	DrawText(FString::Printf(TEXT("Shots: %d  |  Hits: %d (%.1f%%)  |  Reject: %d"), Summary.TotalSubmitted,
-				 Summary.TotalHits, HitRate, Summary.TotalRejected),
-		FLinearColor::White, PanelX + 10.f, CurY + 27.f, nullptr, 0.88f);
-	DrawText(FString::Printf(TEXT("Avg Ack: %.1f ms  |  Avg Age S/T: %.1f / %.1f ms"), Summary.AverageAckMs,
-				 Summary.AverageShotAgeMs, Summary.AverageTargetAgeMs),
-		FLinearColor(0.82f, 0.86f, 0.90f), PanelX + 10.f, CurY + 46.f, nullptr, 0.85f);
-
-	FCombatShotTelemetry LastShot;
-	if (Telemetry && Telemetry->GetLastShot(LastShot))
+	Y += HeaderH + Gap;
+	DrawRect(Background, PanelX, Y, PanelW, ControlsH);
+	DrawUIText(TEXT("리와인드"), Muted, PanelX + 8.f, Y + 5.f, 0.80f);
+	const float ButtonW = (PanelW - 84.f) / 3.f;
+	DrawExperimentButton(TEXT("RewindOff"), TEXT("끄기"), PanelX + 76.f, Y + 2.f, ButtonW, !bRewind, bEnabled);
+	DrawExperimentButton(TEXT("RewindOn"), TEXT("켜기"), PanelX + 79.f + ButtonW, Y + 2.f, ButtonW, bRewind, bEnabled);
+	DrawExperimentButton(
+		TEXT("ResetExperiment"), TEXT("초기화"), PanelX + 82.f + ButtonW * 2.f, Y + 2.f, ButtonW, false, bEnabled);
+	DrawUIText(GetNetMode() == NM_Standalone
+			? TEXT("지연 비교는 네트워크 접속 후 가능합니다")
+			: FString::Printf(TEXT("추가 지연 · 편도 %dms / 왕복 약 +%dms"), Lag, Lag * 2),
+		Muted, PanelX + 8.f, Y + 28.f, 0.78f);
+	const float LagW = (PanelW - 28.f) / 5.f;
+	for (int32 Index = 0; Index < 5; ++Index)
 	{
-		const bool bRejected = LastShot.Rejection != EShotRejection::None;
-		const FLinearColor ResultColor = bRejected ? FLinearColor(1.f, 0.3f, 0.3f)
-			: LastShot.bDamagedPlayer			   ? FLinearColor(0.25f, 0.95f, 0.45f)
-												   : FLinearColor(0.8f, 0.8f, 0.8f);
-		const FString ResultLabel = bRejected
-			? FString::Printf(TEXT("REJECT (%s)"), UCombatTelemetryComponent::RejectionToString(LastShot.Rejection))
-			: (LastShot.bDamagedPlayer ? TEXT("HIT") : TEXT("MISS"));
-		DrawText(FString::Printf(TEXT("Last #%u: %s [%s]"), LastShot.ShotId, *ResultLabel,
-					 LastShot.bUsedRewind ? TEXT("Rewind") : TEXT("CurrWorld")),
-			ResultColor, PanelX + 10.f, CurY + 65.f, nullptr, 0.88f);
-		DrawText(FString::Printf(TEXT("Ack %.1fms | ShotAge %.1fms | TgtAge %.1fms"), LastShot.AckMs,
-					 LastShot.ShotAgeMs, LastShot.TargetAgeMs),
-			FLinearColor(0.75f, 0.88f, 1.f), PanelX + 10.f, CurY + 82.f, nullptr, 0.82f);
+		const int32 Value = Index * 50;
+		DrawExperimentButton(FName(*FString::Printf(TEXT("Lag%d"), Value)), FString::FromInt(Value),
+			PanelX + 8.f + Index * (LagW + 3.f), Y + 45.f, LagW, Value == Lag, bEnabled);
 	}
-	else
+	DrawUIText(TEXT("1 커서 | F6 보정 | F7 지연 | F8 초기화"), Muted, PanelX + 8.f, Y + 72.f, 0.76f);
+
+	Y += ControlsH + Gap;
+	DrawRect(Background, PanelX, Y, PanelW, StatsH);
+	const bool bMeasuring = Telemetry && Telemetry->IsMeasuring();
+	FString Status = bPending ? TEXT("서버 설정 적용 중...")
+		: bMeasuring		  ? TEXT("측정 중 · 현재 조건의 전체 표본")
+							  : TEXT("안정화 중 · 새 표본 수집 대기");
+	if (PC && !PC->GetExperimentNotice().IsEmpty())
 	{
-		DrawText(TEXT("Last Shot: Fire weapon (LMB) to record live server metrics"),
-			FLinearColor(0.6f, 0.65f, 0.7f), PanelX + 10.f, CurY + 68.f, nullptr, 0.84f);
+		Status = PC->GetExperimentNotice();
 	}
+	DrawUIText(Status, bMeasuring && !bPending ? FLinearColor(0.35f, 0.95f, 0.6f) : FLinearColor(1.f, 0.8f, 0.3f),
+		PanelX + 8.f, Y + 4.f, 0.78f);
+	const float ColumnW = (PanelW - 96.f) / 4.f;
+	const TCHAR* Headers[] = {TEXT("현재"), TEXT("평균"), TEXT("최소"), TEXT("최대")};
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		DrawUIText(Headers[Index], Muted, PanelX + 96.f + Index * ColumnW, Y + 23.f, 0.76f);
+	}
+	const FCombatMetricStats* Stats[] = {
+		&Summary.Rtt, &Summary.Fps, &Summary.Frame, &Summary.Ack, &Summary.ShotAge, &Summary.TargetAge};
+	const TCHAR* Labels[] = {TEXT("왕복(ms)"), TEXT("프레임/초"), TEXT("프레임(ms)"), TEXT("응답(ms)"),
+		TEXT("발사경과(ms)"), TEXT("되감기(ms)")};
+	for (int32 Index = 0; Index < 6; ++Index)
+	{
+		DrawMetricRow(Labels[Index], *Stats[Index], PanelX, Y + 42.f + Index * 16.f, PanelW,
+			Index < 3 ? Cyan : FLinearColor(0.5f, 0.95f, 0.65f));
+	}
+	DrawUIText(FString::Printf(TEXT("표본 · 통신 %llu / 응답 %llu / 승인 %llu"), Summary.Rtt.Count, Summary.Ack.Count,
+				   Summary.ShotAge.Count),
+		Muted, PanelX + 8.f, Y + 140.f, 0.72f);
+
+	Y += StatsH + Gap;
+	DrawNetGraphBox(Telemetry, PanelX, Y, PanelW, NetH);
+	Y += NetH + Gap;
+	DrawShotChartBox(
+		Telemetry, GS ? GS->LagCompensation.MaxRewindSeconds * 1000.f : 750.f, PanelX, Y, PanelW, GraphsH - NetH);
+	Y += GraphsH - NetH + Gap;
+	DrawRect(Background, PanelX, Y, PanelW, SummaryH);
+	const float HitRate = Summary.TotalAccepted > 0 ? 100.f * Summary.TotalHits / Summary.TotalAccepted : 0.f;
+	DrawUIText(FString::Printf(TEXT("요청 %d | 승인 %d | 거절 %d"), Summary.TotalSubmitted, Summary.TotalAccepted,
+				   Summary.TotalRejected),
+		FLinearColor::White, PanelX + 8.f, Y + 4.f, 0.80f);
+	DrawUIText(FString::Printf(
+				   TEXT("명중 %d / %d (%.1f%%) · 내 플레이어 기준"), Summary.TotalHits, Summary.TotalAccepted, HitRate),
+		Muted, PanelX + 8.f, Y + 23.f, 0.78f);
+	FCombatShotTelemetry Last;
+	const FString LastLabel = Telemetry && Telemetry->GetLastShot(Last)
+		? FString::Printf(TEXT("최근 #%u: %s [%s]"), Last.ShotId,
+			  Last.Rejection != EShotRejection::None ? UCombatTelemetryComponent::RejectionToString(Last.Rejection)
+				  : Last.bDamagedPlayer				 ? TEXT("명중")
+													 : TEXT("빗나감"),
+			  Last.bUsedRewind ? TEXT("리와인드") : TEXT("현재 판정"))
+		: TEXT("좌클릭으로 사격하면 측정값을 표시합니다");
+	DrawUIText(LastLabel, Muted, PanelX + 8.f, Y + 43.f, 0.78f);
 }
 
-void ACombatHUD::DrawNetGraphBox(
-	const UCombatTelemetryComponent* Telemetry, float X, float Y, float W, float H)
+void ACombatHUD::DrawNetGraphBox(const UCombatTelemetryComponent* Telemetry, float X, float Y, float W, float H)
 {
 	DrawRect(FLinearColor(0.02f, 0.04f, 0.08f, 0.74f), X, Y, W, H);
 	DrawLine(X, Y, X + W, Y, FLinearColor(0.3f, 0.75f, 1.f, 0.7f), 1.f);
@@ -233,13 +417,13 @@ void ACombatHUD::DrawNetGraphBox(
 	}
 	MaxScaleMs = FMath::CeilToFloat(MaxScaleMs / 50.f) * 50.f;
 
-	DrawText(FString::Printf(TEXT("RTT (Cyan) & FRAME (Yellow) [0..%.0f ms]"), MaxScaleMs),
-		FLinearColor(0.75f, 0.9f, 1.f), X + 10.f, Y + 5.f, nullptr, 0.86f);
+	DrawUIText(FString::Printf(TEXT("왕복(하늘색) · 프레임(노랑) [0~%.0fms]"), MaxScaleMs),
+		FLinearColor(0.75f, 0.9f, 1.f), X + 10.f, Y + 5.f, 0.86f);
 
 	const float PlotX = X + 10.f;
 	const float PlotY = Y + 24.f;
 	const float PlotW = W - 20.f;
-	const float PlotH = FMath::Max(36.f, H - 32.f);
+	const float PlotH = FMath::Max(12.f, H - 32.f);
 	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.45f), PlotX, PlotY, PlotW, PlotH);
 
 	// 수평 기준선 (25%, 50%, 75%, 100%)
@@ -252,8 +436,8 @@ void ACombatHUD::DrawNetGraphBox(
 
 	if (Count < 2)
 	{
-		DrawText(TEXT("Collecting RTT/Frame samples..."), FLinearColor(0.55f, 0.6f, 0.65f), PlotX + 8.f,
-			PlotY + PlotH * 0.4f, nullptr, 0.82f);
+		DrawUIText(TEXT("통신·프레임 표본 수집 중..."), FLinearColor(0.55f, 0.6f, 0.65f), PlotX + 8.f,
+			PlotY + PlotH * 0.4f, 0.82f);
 		return;
 	}
 
@@ -290,15 +474,15 @@ void ACombatHUD::DrawShotChartBox(
 	}
 	MaxScaleMs = FMath::CeilToFloat(MaxScaleMs / 50.f) * 50.f;
 
-	DrawText(FString::Printf(TEXT("SHOT ACK & REWIND [0..%.0f ms]"), MaxScaleMs),
-		FLinearColor(0.65f, 0.98f, 0.78f), X + 10.f, Y + 5.f, nullptr, 0.86f);
-	DrawText(TEXT("Grn:Hit Gry:Miss Red:Rej Cyn:Rewind"), FLinearColor(0.68f, 0.74f, 0.8f), X + 10.f, Y + 21.f,
-		nullptr, 0.76f);
+	DrawUIText(FString::Printf(TEXT("사격 응답 · 되감기 [0~%.0fms]"), MaxScaleMs), FLinearColor(0.65f, 0.98f, 0.78f),
+		X + 10.f, Y + 5.f, 0.86f);
+	DrawUIText(TEXT("초록 명중 · 회색 빗나감 · 빨강 거절 · 하늘 되감기"), FLinearColor(0.68f, 0.74f, 0.8f), X + 10.f,
+		Y + 21.f, 0.66f);
 
 	const float PlotX = X + 10.f;
 	const float PlotY = Y + 37.f;
 	const float PlotW = W - 20.f;
-	const float PlotH = FMath::Max(34.f, H - 45.f);
+	const float PlotH = FMath::Max(12.f, H - 45.f);
 	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.45f), PlotX, PlotY, PlotW, PlotH);
 
 	for (int32 Grid = 1; Grid <= 2; ++Grid)
@@ -315,8 +499,8 @@ void ACombatHUD::DrawShotChartBox(
 
 	if (Count <= 0)
 	{
-		DrawText(TEXT("No shots fired yet"), FLinearColor(0.55f, 0.6f, 0.65f), PlotX + 8.f, PlotY + PlotH * 0.35f,
-			nullptr, 0.82f);
+		DrawUIText(TEXT("아직 사격 표본이 없습니다"), FLinearColor(0.55f, 0.6f, 0.65f), PlotX + 8.f,
+			PlotY + PlotH * 0.35f, 0.82f);
 		return;
 	}
 
@@ -351,18 +535,18 @@ const TCHAR* ACombatHUD::GetNetModeLabel() const
 {
 	if (!GetWorld())
 	{
-		return TEXT("Unknown");
+		return TEXT("확인 중");
 	}
 	switch (GetWorld()->GetNetMode())
 	{
 		case NM_Client:
-			return TEXT("Client");
+			return TEXT("클라이언트");
 		case NM_ListenServer:
-			return TEXT("ListenServer");
+			return TEXT("호스트");
 		case NM_DedicatedServer:
-			return TEXT("DedicatedSrv");
+			return TEXT("전용 서버");
 		case NM_Standalone:
 		default:
-			return TEXT("Standalone");
+			return TEXT("단독 실행");
 	}
 }

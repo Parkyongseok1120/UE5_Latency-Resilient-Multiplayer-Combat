@@ -26,6 +26,8 @@ public:
 	TObjectPtr<UInputAction> Reload;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> ADS;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> FireMode;
 
 	bool IsComplete() const;
 	// Built-in keyboard/mouse configuration for a pawn without a configured input asset.

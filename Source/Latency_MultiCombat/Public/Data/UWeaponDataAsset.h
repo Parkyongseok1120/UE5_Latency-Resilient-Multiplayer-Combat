@@ -58,6 +58,8 @@ public:
 	// Played through the character AnimBP slot for each accepted shot, including remote viewers.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon|Animation")
 	TSoftObjectPtr<UAnimSequence> CharacterFireAnimation;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon|Animation")
+	TSoftObjectPtr<UAnimSequence> CharacterReloadAnimation;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon|Animation")
 	FName CharacterAnimationSlot = TEXT("DefaultSlot");

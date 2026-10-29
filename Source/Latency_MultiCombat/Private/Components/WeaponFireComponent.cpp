@@ -1,4 +1,6 @@
 #include "Components/WeaponFireComponent.h"
+#include "Components/CombatFeedbackComponent.h"
+#include "CombatGameState.h"
 #include "Components/WeaponHitValidationComponent.h"
 #include "Components/CombatTimeSyncComponent.h"
 #include "CombatPlayerController.h"
@@ -48,6 +50,7 @@ void UWeaponFireComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(UWeaponFireComponent, CombatState);
 	DOREPLIFETIME(UWeaponFireComponent, bIsADS);
+	DOREPLIFETIME_CONDITION(UWeaponFireComponent, FireMode, COND_OwnerOnly);
 }
 
 void UWeaponFireComponent::TickComponent(
@@ -60,7 +63,7 @@ void UWeaponFireComponent::TickComponent(
 	{
 		return;
 	}
-	if (Character->IsLocallyControlled() && bWantsToFire && Weapon->GetStats().bFullAuto)
+	if (Character->IsLocallyControlled() && bWantsToFire && IsAutomaticFire())
 	{
 		FireWeapon();
 	}
@@ -72,7 +75,7 @@ void UWeaponFireComponent::TickComponent(
 
 void UWeaponFireComponent::SetTriggerHeld(bool bHeld)
 {
-	if (CombatState == ECombatState::Dead)
+	if ((CombatState == ECombatState::Dead && bHeld) || bWantsToFire == bHeld)
 	{
 		return;
 	}
@@ -81,6 +84,59 @@ void UWeaponFireComponent::SetTriggerHeld(bool bHeld)
 	{
 		FireWeapon();
 	}
+}
+
+bool UWeaponFireComponent::IsAutomaticFire() const
+{
+	const ACombatWeapon* Weapon = GetWeapon();
+	const bool bAutomatic =
+		PredictedFireModeRevision > FireMode.Revision ? bPredictedAutomaticFire : FireMode.bAutomatic;
+	return Weapon && Weapon->GetStats().bFullAuto && bAutomatic;
+}
+
+void UWeaponFireComponent::ToggleFireMode()
+{
+	const ACombatWeapon* Weapon = GetWeapon();
+	const ACombatCharacter* Character = Weapon ? Weapon->GetOwningCharacter() : nullptr;
+	if (!Character || (!Weapon->HasAuthority() && !Character->IsLocallyControlled()))
+	{
+		return;
+	}
+	SetAutomaticFire(!IsAutomaticFire(), FMath::Max(PredictedFireModeRevision, FireMode.Revision) + 1);
+}
+
+void UWeaponFireComponent::SetAutomaticFire(bool bNewAutomatic, uint32 Revision)
+{
+	const ACombatWeapon* Weapon = GetWeapon();
+	if (!Weapon || CombatState == ECombatState::Dead || !Weapon->GetStats().bFullAuto)
+	{
+		return;
+	}
+	bWantsToFire = false;
+	if (!Weapon->HasAuthority())
+	{
+		// An older replicated snapshot must not overwrite a newer local B-key change.
+		bPredictedAutomaticFire = bNewAutomatic;
+		PredictedFireModeRevision = Revision;
+		ServerSetAutomaticFire(bNewAutomatic, Revision);
+	}
+	else
+	{
+		if (Revision <= FireMode.Revision)
+		{
+			return;
+		}
+		FireMode.bAutomatic = bNewAutomatic;
+		FireMode.Revision = Revision;
+		GetOwner()->ForceNetUpdate();
+		UE_LOG(LogTemp, Display, TEXT("[FireMode] Server %s Mode=%s Revision=%u"), *GetOwner()->GetName(),
+			FireMode.bAutomatic ? TEXT("Automatic") : TEXT("Single"), FireMode.Revision);
+	}
+}
+
+void UWeaponFireComponent::ServerSetAutomaticFire_Implementation(bool bNewAutomatic, uint32 Revision)
+{
+	SetAutomaticFire(bNewAutomatic, Revision);
 }
 
 bool UWeaponFireComponent::CanFire() const
@@ -108,7 +164,7 @@ void UWeaponFireComponent::FireWeapon()
 		return;
 	}
 	const float Now = GetWorld()->GetTimeSeconds();
-	if (!Weapon->HasAuthority() && Now - LastLocalFireTime < 1.f / Weapon->GetStats().FireRate)
+	if (Now - LastLocalFireTime + KINDA_SMALL_NUMBER < 1.f / Weapon->GetStats().FireRate)
 	{
 		return;
 	}
@@ -117,7 +173,13 @@ void UWeaponFireComponent::FireWeapon()
 	Command.ShotId = ++NextShotId;
 	Command.LifeId = Character->GetLifeId();
 	Command.ServerFireTime = PC ? PC->TimeSync->GetServerTime() : Now;
-	Command.AimRotation = Character->GetBaseAimRotation();
+	// Camera-manager POV includes cosmetic shake; authoritative aim follows controller input.
+	Command.AimRotation =
+		Character->GetController() ? Character->GetControlRotation() : Character->GetBaseAimRotation();
+	if (PC && PC->Feedback)
+	{
+		PC->Feedback->PlayFireShake();
+	}
 	OnShotSubmitted.Broadcast(Command.ShotId);
 	if (Weapon->HasAuthority())
 	{
@@ -191,6 +253,10 @@ EShotRejection UWeaponFireComponent::ValidateCommand(const FCombatShotCommand& C
 FCombatShotResponse UWeaponFireComponent::ProcessShotCommand(const FCombatShotCommand& Command)
 {
 	FCombatShotResponse Response;
+	if (const ACombatGameState* State = GetWorld()->GetGameState<ACombatGameState>())
+	{
+		Response.ExperimentRevision = State->Experiment.Revision;
+	}
 	Response.ShotId = Command.ShotId;
 	Response.Rejection = ValidateCommand(Command);
 	if (Response.Rejection != EShotRejection::None)

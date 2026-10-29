@@ -9,6 +9,7 @@ class UCameraComponent;
 class UCharacterDataAsset;
 class UCombatInputComponent;
 class UStaticMeshComponent;
+class USkeletalMeshComponent;
 class UCharacterPresentationComponent;
 class ACombatWeapon;
 class URewindHistoryComponent;
@@ -26,6 +27,8 @@ public:
 	TSubclassOf<ACombatWeapon> WeaponClass;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<UCameraComponent> FirstPersonCamera;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual")
+	TObjectPtr<USkeletalMeshComponent> FirstPersonArms;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual")
 	TObjectPtr<UStaticMeshComponent> BodyProxy;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual")

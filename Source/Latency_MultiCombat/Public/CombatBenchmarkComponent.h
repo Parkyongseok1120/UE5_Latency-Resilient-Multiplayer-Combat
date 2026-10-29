@@ -6,6 +6,7 @@
 
 class ACombatCharacter;
 class ACombatPlayerState;
+class ACombatPlayerController;
 class UWeaponFireComponent;
 
 // Development-only opt-in behavior. No replicated test state or test damage RPCs.
@@ -31,6 +32,34 @@ private:
 	void Finish(bool bSuccess, const TCHAR* Reason);
 	void CheckPresentation(ACombatCharacter* Character, ACombatCharacter* Peer);
 	void CheckAimIK(ACombatCharacter* Character, ACombatCharacter* Peer);
+	void CheckLiveExperiment();
+	void CaptureHUDSlide(ACombatPlayerController* PC, double Elapsed);
+	void CheckCombatFeedback(ACombatCharacter* Character, ACombatCharacter* Peer);
+	void CheckMovingPresentation(ACombatCharacter* Character, ACombatCharacter* Peer);
+	void CheckFireModes(ACombatCharacter* Character);
+	bool bFireModeCheck = false;
+	bool bFireModesVerified = false;
+	int32 FireModeStage = 0;
+	int32 FireModeAmmoBefore = 0;
+	double FireModeStageAt = 0.0;
+	bool bMovingAimCheck = false;
+	bool bCapturedMovingFire = false;
+	bool bCapturedReloadPose = false;
+	double MovingFireAt = 0.0;
+	double ReloadPoseSeenAt = 0.0;
+	bool bCombatFeedbackCheck = false;
+	bool bCapturedDamage = false;
+	bool bCapturedLowHealth = false;
+	bool bCapturedHalfHealth = false;
+	bool bCapturedRagdoll = false;
+	bool bSawFireShake = false;
+	double RagdollSeenAt = 0.0;
+	double DamageSeenAt = 0.0;
+	double LowHealthSeenAt = 0.0;
+	int32 HUDCaptureStage = 0;
+	bool bLiveExperimentCheck = false;
+	uint32 LiveObservedRevision = 0;
+	double LiveConditionFinishedAt = 0.0;
 	TWeakObjectPtr<ACombatCharacter> BoundCharacter;
 	TWeakObjectPtr<UWeaponFireComponent> BoundFire;
 	TWeakObjectPtr<ACombatCharacter> InitialBluePawn;

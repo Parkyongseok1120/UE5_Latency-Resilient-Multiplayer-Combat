@@ -1,4 +1,5 @@
 #include "Components/CombatInputComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "CombatCharacter.h"
 #include "CombatWeapon.h"
 #include "Components/WeaponFireComponent.h"
@@ -49,6 +50,8 @@ void UCombatInputComponent::BindInput(UInputComponent* PlayerInputComponent)
 	EnhancedInput->BindAction(ActiveInput->Fire, ETriggerEvent::Started, this, &UCombatInputComponent::FireStarted);
 	EnhancedInput->BindAction(ActiveInput->Fire, ETriggerEvent::Completed, this, &UCombatInputComponent::FireEnded);
 	EnhancedInput->BindAction(ActiveInput->Fire, ETriggerEvent::Canceled, this, &UCombatInputComponent::FireEnded);
+	EnhancedInput->BindAction(
+		ActiveInput->FireMode, ETriggerEvent::Started, this, &UCombatInputComponent::FireModeStarted);
 	EnhancedInput->BindAction(ActiveInput->Reload, ETriggerEvent::Started, this, &UCombatInputComponent::ReloadStarted);
 	EnhancedInput->BindAction(ActiveInput->ADS, ETriggerEvent::Started, this, &UCombatInputComponent::ADSStarted);
 	EnhancedInput->BindAction(ActiveInput->ADS, ETriggerEvent::Completed, this, &UCombatInputComponent::ADSEnded);
@@ -125,6 +128,11 @@ void UCombatInputComponent::JumpEnded()
 }
 void UCombatInputComponent::FireStarted()
 {
+	const APlayerController* PC = GetCharacter() ? Cast<APlayerController>(GetCharacter()->GetController()) : nullptr;
+	if (PC && PC->bShowMouseCursor)
+	{
+		return;
+	}
 	if (ACombatWeapon* Weapon = GetWeapon())
 	{
 		Weapon->Fire->SetTriggerHeld(true);
@@ -144,8 +152,25 @@ void UCombatInputComponent::ReloadStarted()
 		Weapon->Ammo->StartReload();
 	}
 }
+void UCombatInputComponent::FireModeStarted()
+{
+	const ACombatCharacter* Character = GetCharacter();
+	const APlayerController* PC = Character ? Cast<APlayerController>(Character->GetController()) : nullptr;
+	if (PC && !PC->bShowMouseCursor)
+	{
+		if (ACombatWeapon* Weapon = GetWeapon())
+		{
+			Weapon->Fire->ToggleFireMode();
+		}
+	}
+}
 void UCombatInputComponent::ADSStarted()
 {
+	const APlayerController* PC = GetCharacter() ? Cast<APlayerController>(GetCharacter()->GetController()) : nullptr;
+	if (PC && PC->bShowMouseCursor)
+	{
+		return;
+	}
 	if (ACombatWeapon* Weapon = GetWeapon())
 	{
 		Weapon->Fire->SetADS(true);

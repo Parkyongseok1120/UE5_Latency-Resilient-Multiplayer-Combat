@@ -28,7 +28,7 @@ static void MapAxis(UInputMappingContext* Context, UInputAction* Action, FKey Ke
 
 bool UCombatInputDataAsset::IsComplete() const
 {
-	return MappingContext && Move && Look && Jump && Fire && Reload && ADS;
+	return MappingContext && Move && Look && Jump && Fire && Reload && ADS && FireMode;
 }
 
 void UCombatInputDataAsset::CreateDefaultMappings()
@@ -40,6 +40,7 @@ void UCombatInputDataAsset::CreateDefaultMappings()
 	Fire = CreateAction(this, TEXT("Fire"), EInputActionValueType::Boolean);
 	Reload = CreateAction(this, TEXT("Reload"), EInputActionValueType::Boolean);
 	ADS = CreateAction(this, TEXT("ADS"), EInputActionValueType::Boolean);
+	FireMode = CreateAction(this, TEXT("FireMode"), EInputActionValueType::Boolean);
 	// Preserve the project's previous mouse-axis sensitivity using an Enhanced Input modifier.
 	UInputModifierScalar* LookScale = NewObject<UInputModifierScalar>(this);
 	LookScale->Scalar = FVector(0.07f, 0.07f, 1.f);
@@ -55,4 +56,5 @@ void UCombatInputDataAsset::CreateDefaultMappings()
 	MappingContext->MapKey(Fire, EKeys::LeftMouseButton);
 	MappingContext->MapKey(Reload, EKeys::R);
 	MappingContext->MapKey(ADS, EKeys::RightMouseButton);
+	MappingContext->MapKey(FireMode, EKeys::B);
 }

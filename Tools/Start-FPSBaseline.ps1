@@ -5,9 +5,15 @@ param(
     [switch]$SmokeTest,
     [switch]$Benchmark,
     [switch]$RewindBenchmark,
+    [switch]$LiveExperimentCheck,
+    [switch]$CombatFeedbackCheck,
+    [switch]$MovingAimCheck,
+    [switch]$FireModeCheck,
     [switch]$DisableLagCompensation,
     [ValidateRange(8, 60)][int]$Samples = 24,
     [switch]$CaptureFrames,
+    [ValidateRange(640, 3840)][int]$WindowWidth = 960,
+    [ValidateRange(360, 2160)][int]$WindowHeight = 540,
     [switch]$ShowWindows
 )
 $ErrorActionPreference = 'Stop'
@@ -16,11 +22,15 @@ $projectFile = Join-Path $projectRoot 'Latency_MultiCombat.uproject'
 $editor = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor.exe'
 if (!(Test-Path -LiteralPath $editor)) { throw "UE executable missing: $editor" }
 if (!(Test-Path -LiteralPath (Join-Path $projectRoot 'Content\Level\FPSBaseline.umap'))) { throw 'Generate FPSBaseline.umap first.' }
-if ($SmokeTest -and ($Benchmark -or $RewindBenchmark -or $ShowWindows -or $CaptureFrames)) { throw 'SmokeTest cannot be combined with a benchmark, ShowWindows or CaptureFrames.' }
+if ($SmokeTest -and ($Benchmark -or $RewindBenchmark -or $LiveExperimentCheck -or $ShowWindows -or $CaptureFrames)) { throw 'SmokeTest cannot be combined with a benchmark, ShowWindows or CaptureFrames.' }
 if ($Benchmark -and $RewindBenchmark) { throw 'Select one benchmark mode.' }
+if ($LiveExperimentCheck -and ($Benchmark -or $RewindBenchmark)) { throw 'LiveExperimentCheck must run by itself.' }
+if ($CombatFeedbackCheck -and !$Benchmark) { throw 'CombatFeedbackCheck requires Benchmark.' }
+if ($MovingAimCheck -and !$Benchmark) { throw 'MovingAimCheck requires Benchmark.' }
+if ($FireModeCheck -and !$Benchmark) { throw 'FireModeCheck requires Benchmark.' }
 if ($RewindBenchmark -and $Samples -gt 24) { throw 'RewindBenchmark supports 8 through 24 samples.' }
-if ($CaptureFrames -and !$Benchmark -and !$RewindBenchmark) { throw 'CaptureFrames requires a benchmark.' }
-$mode = if ($RewindBenchmark) { 'rewind' } elseif ($Benchmark) { 'benchmark' } elseif ($SmokeTest) { 'smoke' } else { 'play' }
+if ($CaptureFrames -and !$Benchmark -and !$RewindBenchmark -and !$LiveExperimentCheck) { throw 'CaptureFrames requires a benchmark.' }
+$mode = if ($LiveExperimentCheck) { 'live-experiment' } elseif ($RewindBenchmark) { 'rewind' } elseif ($Benchmark) { 'benchmark' } elseif ($SmokeTest) { 'smoke' } else { 'play' }
 $runName = '{0}-{1}ms-{2}' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'), $LatencyMs, $mode
 $logDirectory = Join-Path $projectRoot "Saved\FPSBaseline\$runName"
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
@@ -44,14 +54,19 @@ try {
     }
     $clientArgs = $baseArgs + @("127.0.0.1:$Port", '-game')
     $windowStyle = if ($ShowWindows) { 'Normal' } else { 'Hidden' }
-    if ($SmokeTest -or (($Benchmark -or $RewindBenchmark) -and !$ShowWindows -and !$CaptureFrames)) { $clientArgs += '-nullrhi' }
-    else { $clientArgs += @('-windowed', '-ResX=960', '-ResY=540') }
+    if ($SmokeTest -or (($Benchmark -or $RewindBenchmark -or $LiveExperimentCheck) -and !$ShowWindows -and !$CaptureFrames)) { $clientArgs += '-nullrhi' }
+    else { $clientArgs += @('-windowed', "-ResX=$WindowWidth", "-ResY=$WindowHeight") }
+    if ($CaptureFrames -and !$ShowWindows) { $clientArgs += '-RenderOffscreen' }
     if ($SmokeTest) { $clientArgs += '-FPSBaselineSmoke' }
     if ($Benchmark) { $clientArgs += @('-FPSBaselineBenchmark', "-FPSBenchmarkSamples=$Samples") }
     if ($RewindBenchmark) { $clientArgs += @('-FPSRewindBenchmark', "-FPSBenchmarkSamples=$Samples") }
-    if ($CaptureFrames) { $clientArgs += '-FPSBenchmarkCapture' }
+    if ($LiveExperimentCheck) { $clientArgs += '-FPSLiveExperimentCheck' }
+    if ($CombatFeedbackCheck) { $clientArgs += '-FPSCombatFeedbackCheck' }
+    if ($MovingAimCheck) { $clientArgs += '-FPSMovingAimCheck' }
+    if ($FireModeCheck) { $clientArgs += '-FPSFireModeCheck' }
+    if ($CaptureFrames) { $clientArgs += @('-FPSBenchmarkCapture', '-ForceRes') }
     $shooterArgs = $clientArgs + @(('-abslog="' + $shooterLog + '"'))
-    if ($SmokeTest -or $Benchmark -or $RewindBenchmark) { $shooterArgs += '-FPSBaselineShooter' }
+    if ($SmokeTest -or $Benchmark -or $RewindBenchmark -or $LiveExperimentCheck) { $shooterArgs += '-FPSBaselineShooter' }
     $shooter = Start-Process -FilePath $editor -ArgumentList $shooterArgs -WindowStyle $windowStyle -PassThru
     $processes += $shooter
     # First connection receives Red; start Blue after the server accepts Red.
@@ -64,17 +79,17 @@ try {
     $observer = Start-Process -FilePath $editor -ArgumentList ($clientArgs + @(('-abslog="' + $observerLog + '"'))) -WindowStyle $windowStyle -PassThru
     $processes += $observer
     Write-Host "[$mode $LatencyMs ms] Server $($server.Id), clients $($shooter.Id), $($observer.Id). Logs: $logDirectory"
-    if (!$SmokeTest -and !$Benchmark -and !$RewindBenchmark) {
+    if (!$SmokeTest -and !$Benchmark -and !$RewindBenchmark -and !$LiveExperimentCheck) {
         Write-Host 'Close both clients when finished; this script will then stop its server.'
         Wait-Process -Id $shooter.Id, $observer.Id
         return
     }
-    $deadline = (Get-Date).AddSeconds($(if ($Benchmark -or $RewindBenchmark) { 180 } else { 75 }))
+    $deadline = (Get-Date).AddSeconds($(if ($Benchmark -or $RewindBenchmark -or $LiveExperimentCheck) { 180 } else { 75 }))
     while (!$shooter.HasExited -or !$observer.HasExited) {
         if ((Get-Date) -gt $deadline) { throw "$mode timed out. Inspect $logDirectory" }
         Start-Sleep -Milliseconds 250
     }
-    $tag = if ($RewindBenchmark) { 'FPSRewindBenchmark' } elseif ($Benchmark) { 'FPSBaselineBenchmark' } else { 'FPSBaselineSmoke' }
+    $tag = if ($RewindBenchmark) { 'FPSRewindBenchmark' } elseif ($Benchmark -or $LiveExperimentCheck) { 'FPSBaselineBenchmark' } else { 'FPSBaselineSmoke' }
     foreach ($log in @($shooterLog, $observerLog)) {
         if (!(Select-String -LiteralPath $log -Pattern "\[$tag\] PASS" -Quiet)) { throw "$mode did not pass: $log" }
         if (Select-String -LiteralPath $log -Pattern "\[$tag\] FAIL|Fatal error:|Assertion failed:" -Quiet) { throw "$mode failed: $log" }

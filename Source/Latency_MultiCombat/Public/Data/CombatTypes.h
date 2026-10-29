@@ -46,7 +46,7 @@ struct FWeaponStats
 	int32 MagazineSize = 30;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon|Ammo")
-	int32 ReserveAmmo = 90;
+	int32 ReserveAmmo = 330;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon|Fire")
 	float ReloadTime = 2.0f; // seconds

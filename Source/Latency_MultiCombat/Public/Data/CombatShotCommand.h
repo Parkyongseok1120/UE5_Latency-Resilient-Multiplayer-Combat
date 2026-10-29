@@ -38,6 +38,9 @@ USTRUCT()
 struct FCombatShotResponse
 {
 	GENERATED_BODY()
+	// The configuration actually used by the server, independent of RPC/property arrival order.
+	UPROPERTY()
+	uint32 ExperimentRevision = 0;
 	UPROPERTY()
 	uint32 ShotId = 0;
 	UPROPERTY()

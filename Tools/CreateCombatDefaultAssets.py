@@ -1,5 +1,9 @@
 """Create or update default character and weapon data assets wired to UE 5.7 default meshes."""
 import unreal
+from pathlib import Path
+
+arms_script = Path(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir())) / "Tools/CreateCombatFirstPersonArms.py"
+exec(compile(arms_script.read_text(encoding="utf-8"), str(arms_script), "exec"))
 
 asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
 
@@ -75,6 +79,10 @@ def create_rifle_anim_blueprint():
             data = node.get_editor_property("node")
             data.set_editor_property("blend_space", locomotion)
             node.set_editor_property("node", data)
+    if not unreal.CombatAnimationAssetLibrary.configure_rifle_upper_body(
+        blueprint, require_asset(f"{root}/Rifle/MF_Rifle_Idle_ADS")
+    ):
+        raise RuntimeError("Could not configure the rifle upper-body layer")
     unreal.BlueprintEditorLibrary.compile_blueprint(blueprint)
     if blueprint.generated_class() is None or not unreal.EditorAssetLibrary.save_loaded_asset(
         blueprint, only_if_is_dirty=False
@@ -153,6 +161,10 @@ weapon_asset = get_or_create_data_asset(
     "DA_DefaultWeapon", "/Game/Data", "/Script/Latency_MultiCombat.WeaponDataAsset"
 )
 weapon_asset.set_editor_property("weapon_name", unreal.Text("Assault Rifle"))
+weapon_stats = weapon_asset.get_editor_property("stats")
+weapon_stats.set_editor_property("magazine_size", 30)
+weapon_stats.set_editor_property("reserve_ammo", 330)
+weapon_asset.set_editor_property("stats", weapon_stats)
 weapon_asset.set_editor_property("weapon_skeletal_mesh", weapon_skel)
 if weapon_static is not None:
     weapon_asset.set_editor_property("weapon_mesh", weapon_static)
@@ -163,6 +175,7 @@ weapon_asset.set_editor_property("first_person_rotation_offset", unreal.Rotator(
 weapon_asset.set_editor_property("third_person_location_offset", unreal.Vector(-2.0, 4.0, -2.0))
 weapon_asset.set_editor_property("third_person_rotation_offset", unreal.Rotator(pitch=0.0, yaw=0.0, roll=0.0))
 weapon_asset.set_editor_property("character_fire_animation", fire_animation)
+weapon_asset.set_editor_property("character_reload_animation", require_asset("/Game/Characters/Mannequins/Anims/Rifle/MM_Rifle_Reload"))
 weapon_asset.set_editor_property("character_animation_slot", unreal.Name("DefaultSlot"))
 weapon_asset.set_editor_property("left_hand_grip_socket_name", unreal.Name("GripPoint_002"))
 weapon_asset.set_editor_property("left_hand_grip_offset", left_hand_grip_offset)

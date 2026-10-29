@@ -5,6 +5,7 @@
 #include "CharacterPresentationComponent.generated.h"
 
 class UStaticMesh;
+class USkeletalMesh;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 
@@ -16,6 +17,9 @@ public:
 	UCharacterPresentationComponent();
 	void ApplyAssets();
 	bool UsesSkeletalBody() const { return bUsesSkeletalBody; }
+	void StartDeathRagdoll();
+	void UpdateFirstPersonArms();
+	bool IsRagdollActive() const { return bRagdollActive; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -27,6 +31,8 @@ private:
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> DefaultBodyMesh;
 	UPROPERTY()
+	TObjectPtr<USkeletalMesh> FirstPersonArmMesh;
+	UPROPERTY()
 	TObjectPtr<UMaterialInterface> DefaultBodyMaterial;
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> BodyMaterials;
@@ -35,4 +41,5 @@ private:
 	bool bDisplayedDead = false;
 	bool bHasDisplayedTeam = false;
 	bool bUsesSkeletalBody = false;
+	bool bRagdollActive = false;
 };

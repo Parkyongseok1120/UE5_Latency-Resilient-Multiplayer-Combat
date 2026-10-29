@@ -78,7 +78,8 @@ bool FFPSBaselineFireReloadTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Reload blocks shooting"), Shooter->GetWeapon()->Ammo->GetMagazineAmmo(), 29);
 	Fixture.Advance(2.1f);
 	TestEqual(TEXT("Server finishes reload"), Shooter->GetWeapon()->Ammo->GetMagazineAmmo(), 30);
-	TestEqual(TEXT("Only missing rounds transferred"), Shooter->GetWeapon()->Ammo->GetReserveAmmo(), 89);
+	TestEqual(TEXT("Only missing rounds transferred"), Shooter->GetWeapon()->Ammo->GetReserveAmmo(),
+		FWeaponStats().ReserveAmmo - 1);
 	FWeaponStats EmptyReserve;
 	EmptyReserve.ReserveAmmo = 0;
 	ACombatPlayerController* EmptyPC = Fixture.SpawnPlayer(FVector(-1000, 500, 300), ETeamSide::Red, EmptyReserve);

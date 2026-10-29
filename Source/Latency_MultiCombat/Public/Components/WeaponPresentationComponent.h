@@ -24,6 +24,7 @@ public:
 	bool UsesSkeletalWeapon() const { return bUsesSkeletalWeapon; }
 	UFUNCTION(BlueprintPure, Category = "Weapon")
 	float GetLastHitConfirmationTime() const { return LastHitConfirmationTime; }
+	bool IsReloadAnimationPlaying() const { return bReloadPresentation; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -46,6 +47,11 @@ private:
 	TObjectPtr<USoundBase> FireSound;
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimMontage> CharacterFireMontage;
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> CharacterReloadMontage;
+	bool bReloadPresentation = false;
+	float ReloadVisualStartedAt = 0.f;
+	float ReloadVisualDuration = 1.f;
 	FVector FirstPersonRestLocation = FVector::ZeroVector;
 	FRotator FirstPersonRestRotation = FRotator::ZeroRotator;
 	float RecoilWeight = 0.f;

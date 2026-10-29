@@ -102,12 +102,19 @@ void UWeaponPresentationComponent::ApplyAssets()
 		? Data->FireSound.LoadSynchronous()
 		: nullptr;
 	CharacterFireMontage = nullptr;
+	CharacterReloadMontage = nullptr;
+	bReloadPresentation = false;
 	if (Data && GetNetMode() != NM_DedicatedServer && !Data->CharacterAnimationSlot.IsNone())
 	{
 		if (UAnimSequence* FireAnimation = Data->CharacterFireAnimation.LoadSynchronous())
 		{
 			CharacterFireMontage = UAnimMontage::CreateSlotAnimationAsDynamicMontage(
 				FireAnimation, Data->CharacterAnimationSlot, 0.025f, 0.08f);
+		}
+		if (UAnimSequence* ReloadAnimation = Data->CharacterReloadAnimation.LoadSynchronous())
+		{
+			CharacterReloadMontage = UAnimMontage::CreateSlotAnimationAsDynamicMontage(
+				ReloadAnimation, Data->CharacterAnimationSlot, 0.08f, 0.12f);
 		}
 	}
 	RecoilWeight = 0.f;
@@ -118,7 +125,7 @@ void UWeaponPresentationComponent::ApplyAssets()
 												  : Weapon->WeaponMesh->GetRelativeRotation();
 
 	AttachToCharacter();
-	UpdateVisibility(Weapon->Fire->GetCombatState() != ECombatState::Dead);
+	HandleCombatStateChanged(Weapon->Fire->GetCombatState());
 }
 
 FName UWeaponPresentationComponent::ResolveGripSocket(
@@ -164,6 +171,8 @@ void UWeaponPresentationComponent::AttachToCharacter()
 		Weapon->AttachToComponent(
 			Character->FirstPersonCamera, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 	}
+	// Keep the raised eye line above the view weapon and its attached hands.
+	Weapon->SetActorRelativeLocation(FVector(0.f, 0.f, -4.f));
 
 	const UWeaponDataAsset* Data = Weapon->WeaponData.Get();
 	USkeletalMeshComponent* BodyMesh = Character->GetMesh();
@@ -201,6 +210,36 @@ void UWeaponPresentationComponent::AttachToCharacter()
 void UWeaponPresentationComponent::HandleCombatStateChanged(ECombatState NewState)
 {
 	UpdateVisibility(NewState != ECombatState::Dead);
+	ACombatWeapon* Weapon = Cast<ACombatWeapon>(GetOwner());
+	if (!Weapon)
+	{
+		return;
+	}
+	ACombatCharacter* Character = Weapon->GetOwningCharacter();
+	UAnimInstance* Anim = Character ? Character->GetMesh()->GetAnimInstance() : nullptr;
+	if (NewState == ECombatState::Reloading && !bReloadPresentation)
+	{
+		bReloadPresentation = true;
+		ReloadVisualStartedAt = GetWorld()->GetTimeSeconds();
+		ReloadVisualDuration = FMath::Max(0.1f, Weapon->GetStats().ReloadTime);
+		if (Anim && CharacterReloadMontage)
+		{
+			Anim->Montage_Play(CharacterReloadMontage, CharacterReloadMontage->GetPlayLength() / ReloadVisualDuration);
+		}
+		SetComponentTickEnabled(true);
+	}
+	else if (NewState != ECombatState::Reloading && bReloadPresentation)
+	{
+		bReloadPresentation = false;
+		if (Anim && CharacterReloadMontage)
+		{
+			Anim->Montage_Stop(0.10f, CharacterReloadMontage);
+		}
+		if (Character && Character->IsLocallyControlled())
+		{
+			ApplyFirstPersonRecoil();
+		}
+	}
 }
 
 void UWeaponPresentationComponent::UpdateVisibility(bool bVisible)
@@ -285,7 +324,7 @@ void UWeaponPresentationComponent::TickComponent(
 	if (RecoilWeight < 0.001f)
 	{
 		RecoilWeight = 0.f;
-		SetComponentTickEnabled(false);
+		SetComponentTickEnabled(bReloadPresentation);
 	}
 	ApplyFirstPersonRecoil();
 }
@@ -300,8 +339,15 @@ void UWeaponPresentationComponent::ApplyFirstPersonRecoil()
 	USceneComponent* ViewMesh = bUsesSkeletalWeapon ? static_cast<USceneComponent*>(Weapon->FirstPersonMesh.Get())
 													: static_cast<USceneComponent*>(Weapon->WeaponMesh.Get());
 	const FQuat RecoilRotation = FRotator(2.f * RecoilWeight, 0.f, 0.f).Quaternion();
-	ViewMesh->SetRelativeLocationAndRotation(FirstPersonRestLocation + FVector(-3.f, 0.f, 0.7f) * RecoilWeight,
-		RecoilRotation * FirstPersonRestRotation.Quaternion());
+	const float Progress = bReloadPresentation
+		? FMath::Clamp((GetWorld()->GetTimeSeconds() - ReloadVisualStartedAt) / ReloadVisualDuration, 0.f, 1.f)
+		: 0.f;
+	const float ReloadWeight = bReloadPresentation ? FMath::Sin(Progress * PI) : 0.f;
+	const FVector ReloadOffset(-3.f * ReloadWeight, -4.f * ReloadWeight, 2.f * ReloadWeight);
+	const FQuat ReloadRotation = FRotator(12.f * ReloadWeight, -15.f * ReloadWeight, 30.f * ReloadWeight).Quaternion();
+	ViewMesh->SetRelativeLocationAndRotation(
+		FirstPersonRestLocation + ReloadOffset + FVector(-3.f, 0.f, 0.7f) * RecoilWeight,
+		ReloadRotation * RecoilRotation * FirstPersonRestRotation.Quaternion());
 }
 
 void UWeaponPresentationComponent::ConfirmHit()

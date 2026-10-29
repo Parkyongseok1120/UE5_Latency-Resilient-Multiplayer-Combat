@@ -13,6 +13,16 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FBaselineHitConfirmed, uint32);
 DECLARE_MULTICAST_DELEGATE_OneParam(FWeaponStateChanged, ECombatState);
 DECLARE_MULTICAST_DELEGATE_OneParam(FCombatShotResult, const FCombatShotResponse&);
 
+USTRUCT()
+struct FCombatFireModeState
+{
+	GENERATED_BODY()
+	UPROPERTY()
+	bool bAutomatic = true;
+	UPROPERTY()
+	uint32 Revision = 0;
+};
+
 UCLASS(ClassGroup = (Combat), meta = (BlueprintSpawnableComponent))
 class LATENCY_MULTICOMBAT_API UWeaponFireComponent : public UActorComponent
 {
@@ -21,6 +31,9 @@ public:
 	UWeaponFireComponent();
 	void FireWeapon();
 	void SetTriggerHeld(bool bHeld);
+	void ToggleFireMode();
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	bool IsAutomaticFire() const;
 	void SetADS(bool bNewADS);
 	void MarkDead();
 	// RPC랑 테스트 모두 여기서 시각, 생명 ID, 발사 상태를 확인함.
@@ -49,6 +62,8 @@ private:
 	void ServerFire(FCombatShotCommand Command);
 	UFUNCTION(Server, Reliable)
 	void ServerSetADS(bool bNewADS);
+	UFUNCTION(Server, Reliable)
+	void ServerSetAutomaticFire(bool bNewAutomatic, uint32 Revision);
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastShot(FVector_NetQuantize TraceStart, FVector_NetQuantize TraceEnd, bool bBlockingHit, uint32 ShotId,
 		bool bDamagedPlayer);
@@ -60,12 +75,17 @@ private:
 	void SetCombatState(ECombatState NewState);
 	void RefreshCombatState();
 	void ReloadChanged();
+	void SetAutomaticFire(bool bNewAutomatic, uint32 Revision);
 	ACombatWeapon* GetWeapon() const;
 	UPROPERTY(ReplicatedUsing = OnRep_CombatState, BlueprintReadOnly, Category = "Combat",
 		meta = (AllowPrivateAccess = "true"))
 	ECombatState CombatState = ECombatState::Idle;
 	UPROPERTY(Replicated)
 	bool bIsADS = false;
+	UPROPERTY(Replicated)
+	FCombatFireModeState FireMode;
+	bool bPredictedAutomaticFire = true;
+	uint32 PredictedFireModeRevision = 0;
 	uint32 NextShotId = 0;
 	uint32 LastProcessedShotId = 0;
 	double LastAcceptedShotTime = -1000.0;

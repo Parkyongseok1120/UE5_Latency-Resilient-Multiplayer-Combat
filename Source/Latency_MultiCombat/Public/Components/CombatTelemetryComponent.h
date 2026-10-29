@@ -7,6 +7,29 @@
 
 class UWeaponFireComponent;
 
+// Whole measurement interval, independent of the short graph history.
+struct FCombatMetricStats
+{
+	uint64 Count = 0;
+	double Sum = 0.0;
+	float Current = 0.f;
+	float Minimum = 0.f;
+	float Maximum = 0.f;
+	void Add(float Value)
+	{
+		if (!FMath::IsFinite(Value) || Value < 0.f)
+		{
+			return;
+		}
+		Minimum = Count == 0 ? Value : FMath::Min(Minimum, Value);
+		Maximum = Count == 0 ? Value : FMath::Max(Maximum, Value);
+		Current = Value;
+		Sum += Value;
+		++Count;
+	}
+	float Average() const { return Count > 0 ? static_cast<float>(Sum / Count) : 0.f; }
+};
+
 struct FCombatNetSample
 {
 	float TimeSeconds = 0.f;
@@ -28,6 +51,12 @@ struct FCombatShotTelemetry
 
 struct FCombatTelemetrySummary
 {
+	FCombatMetricStats Rtt;
+	FCombatMetricStats Fps;
+	FCombatMetricStats Frame;
+	FCombatMetricStats Ack;
+	FCombatMetricStats ShotAge;
+	FCombatMetricStats TargetAge;
 	int32 TotalSubmitted = 0;
 	int32 TotalAccepted = 0;
 	int32 TotalRejected = 0;
@@ -66,6 +95,9 @@ public:
 	bool GetLastShot(FCombatShotTelemetry& OutShot) const;
 
 	FCombatTelemetrySummary GetSummary() const;
+	void RefreshExperiment();
+	bool IsMeasuring() const;
+	uint32 GetExperimentRevision() const { return ExperimentRevision; }
 	static const TCHAR* RejectionToString(EShotRejection Rejection);
 
 protected:
@@ -79,6 +111,7 @@ private:
 	{
 		uint32 ShotId = 0;
 		double SubmittedPlatformSeconds = 0.0;
+		uint32 ExperimentRevision = 0;
 	};
 
 	void BindFireComponent(UWeaponFireComponent* NewFire);
@@ -86,6 +119,7 @@ private:
 	void HandleShotResult(const FCombatShotResponse& Response);
 	void PushNetSample(const FCombatNetSample& Sample);
 	void PushShotSample(const FCombatShotTelemetry& Sample);
+	void ResetMeasurement();
 
 	TWeakObjectPtr<UWeaponFireComponent> BoundFire;
 	TArray<FCombatNetSample> NetRing;
@@ -103,10 +137,14 @@ private:
 	int32 TotalAccepted = 0;
 	int32 TotalRejected = 0;
 	int32 TotalHits = 0;
-	double AccumulatedAckMs = 0.0;
-	double AccumulatedShotAgeMs = 0.0;
-	double AccumulatedTargetAgeMs = 0.0;
-	int32 TotalResultCount = 0;
+	FCombatMetricStats RttStats;
+	FCombatMetricStats FpsStats;
+	FCombatMetricStats FrameStats;
+	FCombatMetricStats AckStats;
+	FCombatMetricStats ShotAgeStats;
+	FCombatMetricStats TargetAgeStats;
+	uint32 ExperimentRevision = 0;
+	double LocalCollectAfter = 0.0;
 	float CurrentRttMs = 0.f;
 	float PeakRttMs = 0.f;
 	float CurrentPingMs = 0.f;

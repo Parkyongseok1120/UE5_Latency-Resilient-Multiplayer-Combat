@@ -2,6 +2,8 @@
 #include "Components/RewindBenchmarkComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "CombatPlayerState.h"
+#include "Engine/NetDriver.h"
+#include "Engine/World.h"
 
 ACombatGameState::ACombatGameState()
 	: RedTeamScore(0), BlueTeamScore(0), bMatchEnded(false), WinningTeam(ETeamSide::Neutral)
@@ -18,6 +20,70 @@ void ACombatGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME(ACombatGameState, bMatchEnded);
 	DOREPLIFETIME(ACombatGameState, WinningTeam);
 	DOREPLIFETIME(ACombatGameState, LagCompensation);
+	DOREPLIFETIME(ACombatGameState, Experiment);
+}
+
+bool ACombatGameState::SupportsLiveExperiments()
+{
+#if !UE_BUILD_SHIPPING && DO_ENABLE_NET_TEST
+	return true;
+#else
+	return false;
+#endif
+}
+
+void ACombatGameState::InitializeExperiment()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	Experiment.bRewindEnabled = LagCompensation.bEnabled;
+#if DO_ENABLE_NET_TEST
+	if (const UNetDriver* Driver = GetWorld()->GetNetDriver())
+	{
+		Experiment.PacketLagMs = Driver->PacketSimulationSettings.PktLag;
+	}
+#endif
+	ForceNetUpdate();
+}
+
+bool ACombatGameState::SetExperiment(bool bRewindEnabled, int32 PacketLagMs, uint32 ExpectedRevision)
+{
+	if (!HasAuthority() || !SupportsLiveExperiments() || ExpectedRevision != Experiment.Revision ||
+		!FCombatExperimentState::IsValidLag(PacketLagMs))
+	{
+		return false;
+	}
+	const int32 PreviousLag = Experiment.PacketLagMs;
+	++Experiment.Revision;
+	Experiment.bRewindEnabled = bRewindEnabled;
+	Experiment.PacketLagMs = PacketLagMs;
+	// Drain old delayed packets and allow a fresh clock sample before collecting the new interval.
+	Experiment.CollectAfterServerTime = GetWorld()->GetTimeSeconds() + 2.0 +
+		4.0 * FMath::Max(PreviousLag, PacketLagMs) / 1000.0;
+	OnRep_Experiment();
+	ForceNetUpdate();
+	return true;
+}
+
+void ACombatGameState::OnRep_Experiment()
+{
+	if (Experiment.Revision == 0)
+	{
+		return;
+	}
+	LagCompensation.bEnabled = Experiment.bRewindEnabled;
+#if DO_ENABLE_NET_TEST
+	if (UNetDriver* Driver = GetWorld()->GetNetDriver())
+	{
+		FPacketSimulationSettings Settings;
+		Settings.PktLag = Experiment.PacketLagMs;
+		Driver->SetPacketSimulationSettings(Settings);
+	}
+#endif
+	UE_LOG(LogTemp, Display, TEXT("[LiveExperiment] Mode=%d Revision=%u Rewind=%d OneWayLagMs=%d"),
+		GetNetMode(), Experiment.Revision, Experiment.bRewindEnabled, Experiment.PacketLagMs);
 }
 
 int32 ACombatGameState::GetTeamMemberCount(ETeamSide Team) const

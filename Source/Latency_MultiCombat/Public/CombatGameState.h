@@ -5,6 +5,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "Data/CombatTypes.h"
 #include "Data/CombatNetworkDataAsset.h"
+#include "Data/CombatExperimentState.h"
 #include "CombatGameState.generated.h"
 
 class ACombatPlayerState;
@@ -21,6 +22,11 @@ public:
 	TObjectPtr<URewindBenchmarkComponent> RewindBenchmark;
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Network")
 	FLagCompensationSettings LagCompensation;
+	UPROPERTY(ReplicatedUsing = OnRep_Experiment)
+	FCombatExperimentState Experiment;
+	void InitializeExperiment();
+	bool SetExperiment(bool bRewindEnabled, int32 PacketLagMs, uint32 ExpectedRevision);
+	static bool SupportsLiveExperiments();
 
 	// Team scores (total kills per team)
 	UPROPERTY(Replicated, BlueprintReadOnly)
@@ -69,4 +75,8 @@ public:
 
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+private:
+	UFUNCTION()
+	void OnRep_Experiment();
 };

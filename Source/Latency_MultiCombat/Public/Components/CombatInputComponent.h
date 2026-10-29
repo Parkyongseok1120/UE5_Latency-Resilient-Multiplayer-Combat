@@ -39,6 +39,7 @@ private:
 	void JumpEnded();
 	void FireStarted();
 	void FireEnded();
+	void FireModeStarted();
 	void ReloadStarted();
 	void ADSStarted();
 	void ADSEnded();

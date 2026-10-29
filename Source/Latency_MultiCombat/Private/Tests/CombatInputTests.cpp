@@ -51,15 +51,15 @@ bool FCombatDefaultInputTest::RunTest(const FString& Parameters)
 				{
 					Value = Modifier->ModifyRaw(nullptr, Value, 0.016f);
 				}
-				TestTrue(*FString::Printf(TEXT("%s input %+.0f retains direction and sensitivity"),
-					*Axis.Key.ToString(), Direction),
+				TestTrue(*FString::Printf(
+							 TEXT("%s input %+.0f retains direction and sensitivity"), *Axis.Key.ToString(), Direction),
 					Value.Get<FVector2D>().Equals(Axis.Value * Direction, 0.0001f));
 			}
 		}
 		TestTrue(*FString::Printf(TEXT("%s has a mapping"), *Axis.Key.ToString()), bFound);
 	}
-	const FKey ButtonKeys[] = {EKeys::SpaceBar, EKeys::LeftMouseButton, EKeys::R, EKeys::RightMouseButton};
-	const UInputAction* ButtonActions[] = {Data->Jump, Data->Fire, Data->Reload, Data->ADS};
+	const FKey ButtonKeys[] = {EKeys::SpaceBar, EKeys::LeftMouseButton, EKeys::R, EKeys::RightMouseButton, EKeys::B};
+	const UInputAction* ButtonActions[] = {Data->Jump, Data->Fire, Data->Reload, Data->ADS, Data->FireMode};
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(ButtonKeys); ++Index)
 	{
 		bool bFound = false;

@@ -26,6 +26,9 @@ public:
 	bool CanInteractWithExperimentPanel() const;
 
 private:
+	bool bScenarioSettingsOpen = false;
+	void DrawScenarioSettings(const ACombatPlayerController* PC, const ACombatGameState* GS,
+		float PanelX, float PanelW, float Y);
 	float PanelSlideProgress = 0.f;
 	float PanelTextRightEdge = 0.f;
 	void DrawTelemetrySummary(const ACombatPlayerController* PC, const ACombatGameState* GS,

@@ -3,6 +3,8 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Data/CombatExperimentState.h"
+#include "Data/CombatShotCommand.h"
 #include "CombatPlayerController.generated.h"
 
 class UCombatBenchmarkComponent;
@@ -32,6 +34,11 @@ public:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
 	void RequestExperiment(bool bRewindEnabled, int32 PacketLagMs);
+	void RequestScenario(const FCombatScenarioSettings& Settings);
+	void RequestScenarioRunning(bool bStart);
+	bool IsScenarioParticipant() const;
+	UFUNCTION(Server, Reliable)
+	void ServerScenarioSample(uint32 RunId, int32 Pass, int32 SampleIndex, FCombatShotResponse Response, float AckMs);
 	bool IsExperimentRequestPending() const;
 	void ToggleExperimentPanel();
 	bool IsExperimentPanelOpen() const { return bExperimentPanelOpen; }
@@ -46,6 +53,12 @@ private:
 	bool bExperimentPanelOpen = false;
 	UFUNCTION(Server, Reliable)
 	void ServerSetExperiment(bool bRewindEnabled, int32 PacketLagMs, uint32 ExpectedRevision);
+	UFUNCTION(Server, Reliable)
+	void ServerSetScenario(FCombatScenarioSettings Settings, uint32 ExpectedRevision);
+	UFUNCTION(Server, Reliable)
+	void ServerSetScenarioRunning(bool bStart, uint32 ExpectedRevision, uint32 ExpectedRunId);
+	UFUNCTION(Client, Reliable)
+	void ClientScenarioNotice(const FString& Notice);
 	UFUNCTION(Client, Reliable)
 	void ClientExperimentRequestResult(bool bAccepted);
 	bool bExperimentRequestPending = false;

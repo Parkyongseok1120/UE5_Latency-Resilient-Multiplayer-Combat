@@ -1,5 +1,6 @@
 #include "CombatGameState.h"
 #include "Components/RewindBenchmarkComponent.h"
+#include "Components/CombatScenarioComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "CombatPlayerState.h"
 #include "Engine/NetDriver.h"
@@ -9,6 +10,7 @@ ACombatGameState::ACombatGameState()
 	: RedTeamScore(0), BlueTeamScore(0), bMatchEnded(false), WinningTeam(ETeamSide::Neutral)
 {
 	RewindBenchmark = CreateDefaultSubobject<URewindBenchmarkComponent>(TEXT("RewindBenchmark"));
+	ScenarioRunner = CreateDefaultSubobject<UCombatScenarioComponent>(TEXT("ScenarioRunner"));
 }
 
 void ACombatGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -65,6 +67,17 @@ bool ACombatGameState::SetExperiment(bool bRewindEnabled, int32 PacketLagMs, uin
 	OnRep_Experiment();
 	ForceNetUpdate();
 	return true;
+}
+
+bool ACombatGameState::SetScenario(const FCombatScenarioSettings& Settings, uint32 ExpectedRevision)
+{
+	if (!HasAuthority() || !SupportsLiveExperiments() || ExpectedRevision != Experiment.Revision ||
+		!Settings.IsValid() || ScenarioRunner->IsBusy())
+	{
+		return false;
+	}
+	Experiment.Scenario = Settings;
+	return SetExperiment(LagCompensation.bEnabled, Experiment.PacketLagMs, ExpectedRevision);
 }
 
 void ACombatGameState::OnRep_Experiment()

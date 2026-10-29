@@ -6,6 +6,7 @@
 #include "CombatWeapon.h"
 #include "Components/CombatTelemetryComponent.h"
 #include "Components/CombatTimeSyncComponent.h"
+#include "Components/CombatScenarioComponent.h"
 #include "Components/HealthComponent.h"
 #include "Components/WeaponAmmoComponent.h"
 #include "Components/WeaponFireComponent.h"
@@ -124,7 +125,8 @@ void ACombatHUD::DrawTelemetrySummary(const ACombatPlayerController* PC, const A
 {
 	const FCombatTelemetrySummary Summary = Telemetry ? Telemetry->GetSummary() : FCombatTelemetrySummary();
 	const FLinearColor Muted(0.70f, 0.77f, 0.84f);
-	DrawRect(FLinearColor(0.02f, 0.04f, 0.08f, 0.78f), PanelX, 14.f, PanelW, 78.f);
+	const bool bHasScenario = GS && GS->ScenarioRunner->GetState().RunId != 0;
+	DrawRect(FLinearColor(0.02f, 0.04f, 0.08f, 0.78f), PanelX, 14.f, PanelW, bHasScenario ? 98.f : 78.f);
 	DrawUIText(TEXT("현재 상태"), FLinearColor(0.4f, 0.9f, 1.f), PanelX + 8.f, 19.f, 0.85f, true);
 	DrawUIText(TEXT("Tab 상세 보기"), Muted, PanelX + PanelW - 100.f, 20.f, 0.72f);
 	DrawUIText(FString::Printf(TEXT("왕복 %.0fms | %.0f 프레임/초"), Summary.CurrentRttMs, Summary.CurrentFps),
@@ -140,6 +142,10 @@ void ACombatHUD::DrawTelemetrySummary(const ACombatPlayerController* PC, const A
 		State += TEXT(" · 안정화 중");
 	}
 	DrawUIText(State, Muted, PanelX + 8.f, 65.f, 0.75f);
+	if (bHasScenario)
+	{
+		DrawUIText(GS->ScenarioRunner->GetProgressLabel(), Muted, PanelX + 8.f, 87.f, 0.72f);
+	}
 }
 
 void ACombatHUD::DrawGameplayHUD(const ACombatPlayerState* PS, const ACombatCharacter* Character,
@@ -271,6 +277,60 @@ void ACombatHUD::NotifyHitBoxClick(FName BoxName)
 	{
 		return;
 	}
+	if (BoxName == TEXT("ScenarioTab"))
+	{
+		bScenarioSettingsOpen = !bScenarioSettingsOpen;
+		return;
+	}
+	if (!bScenarioSettingsOpen) { return; }
+	if (BoxName == TEXT("StartScenario") || BoxName == TEXT("StopScenario"))
+	{
+		PC->RequestScenarioRunning(BoxName == TEXT("StartScenario"));
+		return;
+	}
+	if (GS->ScenarioRunner->IsBusy() || PC->IsExperimentRequestPending()) { return; }
+	FCombatScenarioSettings Settings = GS->Experiment.Scenario;
+	bool bScenarioChange = true;
+	if (BoxName == TEXT("ScenarioBaseline"))
+	{
+		Settings.Kind = ECombatExperimentKind::Baseline;
+		Settings.bMovingTarget = false;
+		Settings.bIntentionalMisses = false;
+		Settings.Repetitions = 3;
+	}
+	else if (BoxName == TEXT("ScenarioCompare"))
+	{
+		Settings.Kind = ECombatExperimentKind::RewindComparison;
+		Settings.bMovingTarget = true;
+		Settings.bIntentionalMisses = false;
+		Settings.Repetitions = 1;
+	}
+	else if (BoxName == TEXT("TargetStill")) { Settings.bMovingTarget = false; }
+	else if (BoxName == TEXT("TargetMoving")) { Settings.bMovingTarget = true; }
+	else if (BoxName == TEXT("MissOff")) { Settings.bIntentionalMisses = false; }
+	else if (BoxName == TEXT("MissOn"))
+	{
+		if (Settings.Kind != ECombatExperimentKind::RewindComparison) { return; }
+		Settings.bIntentionalMisses = true;
+	}
+	else if (BoxName == TEXT("DistanceMinus")) { --Settings.DistanceMeters; }
+	else if (BoxName == TEXT("DistancePlus")) { ++Settings.DistanceMeters; }
+	else if (BoxName == TEXT("ShotsMinus")) { --Settings.ShotsPerRun; }
+	else if (BoxName == TEXT("ShotsPlus")) { ++Settings.ShotsPerRun; }
+	else if (BoxName == TEXT("RepeatsMinus")) { --Settings.Repetitions; }
+	else if (BoxName == TEXT("RepeatsPlus")) { ++Settings.Repetitions; }
+	else { bScenarioChange = false; }
+	if (bScenarioChange)
+	{
+		PC->RequestScenario(Settings);
+		return;
+	}
+	if (BoxName == TEXT("LagMinus") || BoxName == TEXT("LagPlus"))
+	{
+		const int32 Delta = BoxName == TEXT("LagPlus") ? 50 : -50;
+		PC->RequestExperiment(GS->LagCompensation.bEnabled, GS->Experiment.PacketLagMs + Delta);
+		return;
+	}
 	if (BoxName == TEXT("RewindOn") || BoxName == TEXT("RewindOff"))
 	{
 		const bool bEnabled = BoxName == TEXT("RewindOn");
@@ -285,7 +345,7 @@ void ACombatHUD::NotifyHitBoxClick(FName BoxName)
 	}
 	else
 	{
-		for (const int32 Lag : {0, 50, 100, 150, 200})
+		for (const int32 Lag : {0, 50, 100, 150, 200, 500})
 		{
 			if (BoxName == FName(*FString::Printf(TEXT("Lag%d"), Lag)))
 			{
@@ -304,7 +364,7 @@ void ACombatHUD::DrawRightTelemetryPanel(const ACombatPlayerController* PC, cons
 {
 	const float Gap = 5.f;
 	const float HeaderH = 42.f;
-	const float ControlsH = 90.f;
+	const float ControlsH = 28.f;
 	const float StatsH = 158.f;
 	const float SummaryH = 64.f;
 	const float GraphsH = FMath::Max(110.f, Canvas->ClipY - 28.f - HeaderH - ControlsH - StatsH - SummaryH - Gap * 5.f);
@@ -314,12 +374,13 @@ void ACombatHUD::DrawRightTelemetryPanel(const ACombatPlayerController* PC, cons
 	const FLinearColor Muted(0.65f, 0.72f, 0.80f);
 	const FCombatTelemetrySummary Summary = Telemetry ? Telemetry->GetSummary() : FCombatTelemetrySummary();
 	const bool bPending = PC && PC->IsExperimentRequestPending();
-	const bool bEnabled = GS && ACombatGameState::SupportsLiveExperiments() && !bPending;
 	const bool bRewind = GS && GS->LagCompensation.bEnabled;
 	const int32 Lag = GS ? GS->Experiment.PacketLagMs : 0;
 	float Y = 14.f;
 	DrawRect(Background, PanelX, Y, PanelW, HeaderH);
 	DrawUIText(TEXT("실시간 실험 지표"), Cyan, PanelX + 8.f, Y + 4.f, 0.90f, true);
+	DrawExperimentButton(TEXT("ScenarioTab"), bScenarioSettingsOpen ? TEXT("통계 보기") : TEXT("실험 설정"),
+		PanelX + PanelW - 159.f, Y + 2.f, 78.f, bScenarioSettingsOpen, true);
 	DrawUIText(TEXT("Tab 접기"), Muted, PanelX + PanelW - 75.f, Y + 7.f, 0.72f);
 	DrawUIText(
 		FString::Printf(TEXT("%s | %s | 측정 구간 %u"), GetNetModeLabel(),
@@ -327,25 +388,14 @@ void ACombatHUD::DrawRightTelemetryPanel(const ACombatPlayerController* PC, cons
 		Muted, PanelX + 8.f, Y + 25.f, 0.70f);
 
 	Y += HeaderH + Gap;
-	DrawRect(Background, PanelX, Y, PanelW, ControlsH);
-	DrawUIText(TEXT("리와인드"), Muted, PanelX + 8.f, Y + 5.f, 0.80f);
-	const float ButtonW = (PanelW - 84.f) / 3.f;
-	DrawExperimentButton(TEXT("RewindOff"), TEXT("끄기"), PanelX + 76.f, Y + 2.f, ButtonW, !bRewind, bEnabled);
-	DrawExperimentButton(TEXT("RewindOn"), TEXT("켜기"), PanelX + 79.f + ButtonW, Y + 2.f, ButtonW, bRewind, bEnabled);
-	DrawExperimentButton(
-		TEXT("ResetExperiment"), TEXT("초기화"), PanelX + 82.f + ButtonW * 2.f, Y + 2.f, ButtonW, false, bEnabled);
-	DrawUIText(GetNetMode() == NM_Standalone
-			? TEXT("지연 비교는 네트워크 접속 후 가능합니다")
-			: FString::Printf(TEXT("추가 지연 · 편도 %dms / 왕복 약 +%dms"), Lag, Lag * 2),
-		Muted, PanelX + 8.f, Y + 28.f, 0.78f);
-	const float LagW = (PanelW - 28.f) / 5.f;
-	for (int32 Index = 0; Index < 5; ++Index)
+	if (bScenarioSettingsOpen)
 	{
-		const int32 Value = Index * 50;
-		DrawExperimentButton(FName(*FString::Printf(TEXT("Lag%d"), Value)), FString::FromInt(Value),
-			PanelX + 8.f + Index * (LagW + 3.f), Y + 45.f, LagW, Value == Lag, bEnabled);
+		DrawScenarioSettings(PC, GS, PanelX, PanelW, Y);
+		return;
 	}
-	DrawUIText(TEXT("1 커서 | F6 보정 | F7 지연 | F8 초기화"), Muted, PanelX + 8.f, Y + 72.f, 0.76f);
+	DrawRect(Background, PanelX, Y, PanelW, ControlsH);
+	DrawUIText(FString::Printf(TEXT("리와인드 %s | 편도 %dms · 왕복 약 +%dms"),
+		bRewind ? TEXT("켜짐") : TEXT("꺼짐"), Lag, Lag * 2), Muted, PanelX + 8.f, Y + 6.f, 0.76f);
 
 	Y += ControlsH + Gap;
 	DrawRect(Background, PanelX, Y, PanelW, StatsH);
@@ -356,6 +406,10 @@ void ACombatHUD::DrawRightTelemetryPanel(const ACombatPlayerController* PC, cons
 	if (PC && !PC->GetExperimentNotice().IsEmpty())
 	{
 		Status = PC->GetExperimentNotice();
+	}
+	else if (GS && GS->ScenarioRunner->GetState().RunId != 0)
+	{
+		Status = GS->ScenarioRunner->GetProgressLabel();
 	}
 	DrawUIText(Status, bMeasuring && !bPending ? FLinearColor(0.35f, 0.95f, 0.6f) : FLinearColor(1.f, 0.8f, 0.3f),
 		PanelX + 8.f, Y + 4.f, 0.78f);
@@ -401,6 +455,97 @@ void ACombatHUD::DrawRightTelemetryPanel(const ACombatPlayerController* PC, cons
 			  Last.bUsedRewind ? TEXT("리와인드") : TEXT("현재 판정"))
 		: TEXT("좌클릭으로 사격하면 측정값을 표시합니다");
 	DrawUIText(LastLabel, Muted, PanelX + 8.f, Y + 43.f, 0.78f);
+}
+
+void ACombatHUD::DrawScenarioSettings(const ACombatPlayerController* PC, const ACombatGameState* GS,
+	float X, float W, float Y)
+{
+	if (!GS) { return; }
+	const FLinearColor Background(0.02f, 0.04f, 0.08f, 0.86f);
+	const FLinearColor Muted(0.70f, 0.77f, 0.84f);
+	const FLinearColor Cyan(0.4f, 0.9f, 1.f);
+	const bool bBusy = GS->ScenarioRunner->IsBusy();
+	const bool bEnabled = ACombatGameState::SupportsLiveExperiments() && PC && !PC->IsExperimentRequestPending() && !bBusy;
+	const int32 Lag = GS->Experiment.PacketLagMs;
+	DrawRect(Background, X, Y, W, 119.f);
+	DrawUIText(TEXT("리와인드"), Cyan, X + 8.f, Y + 4.f, 0.84f, true);
+	const float Third = (W - 90.f) / 3.f;
+	DrawExperimentButton(TEXT("RewindOff"), TEXT("끄기"), X + 80.f, Y + 2.f, Third, !GS->LagCompensation.bEnabled, bEnabled);
+	DrawExperimentButton(TEXT("RewindOn"), TEXT("켜기"), X + 83.f + Third, Y + 2.f, Third, GS->LagCompensation.bEnabled, bEnabled);
+	DrawExperimentButton(TEXT("ResetExperiment"), TEXT("초기화"), X + 86.f + Third * 2.f, Y + 2.f, Third, false, bEnabled);
+	DrawUIText(FString::Printf(TEXT("편도 %dms · 추가 왕복 약 %dms"), Lag, Lag * 2), Muted, X + 8.f, Y + 28.f, 0.80f);
+	const int32 Presets[] = {0, 50, 100, 150, 200, 500};
+	const float LagW = (W - 31.f) / 6.f;
+	for (int32 Index = 0; Index < 6; ++Index)
+	{
+		DrawExperimentButton(FName(*FString::Printf(TEXT("Lag%d"), Presets[Index])), FString::FromInt(Presets[Index]),
+			X + 8.f + Index * (LagW + 3.f), Y + 46.f, LagW, Lag == Presets[Index], bEnabled);
+	}
+	DrawExperimentButton(TEXT("LagMinus"), TEXT("-50"), X + 8.f, Y + 72.f, 57.f, false, bEnabled && Lag > 0);
+	DrawUIText(FString::Printf(TEXT("%d ms"), Lag), Cyan, X + 78.f, Y + 75.f, 0.83f, true, W - 154.f);
+	DrawExperimentButton(TEXT("LagPlus"), TEXT("+50"), X + W - 65.f, Y + 72.f, 57.f, false,
+		bEnabled && Lag < FCombatExperimentState::MaxPacketLagMs);
+	DrawUIText(TEXT("편도 0~1,000ms · 50ms 단위 조절"), Muted, X + 8.f, Y + 99.f, 0.73f);
+	Y += 124.f;
+	const bool bCompact = Canvas->ClipY < 540.f;
+	const float RowStep = bCompact ? 23.f : 27.f;
+	const float PlanY = 87.f + RowStep * 4.f;
+	const float SettingsH = PlanY + 25.f;
+	DrawRect(Background, X, Y, W, SettingsH);
+	DrawUIText(TEXT("실험 설정"), Cyan, X + 8.f, Y + 4.f, 0.84f, true);
+	const FCombatScenarioSettings& Settings = GS->Experiment.Scenario;
+	const float ChoiceW = (W - 94.f) / 2.f;
+	DrawUIText(TEXT("종류"), Muted, X + 8.f, Y + 31.f, 0.80f);
+	DrawExperimentButton(TEXT("ScenarioBaseline"), TEXT("기준 지연"), X + 82.f, Y + 28.f, ChoiceW,
+		Settings.Kind == ECombatExperimentKind::Baseline, bEnabled);
+	DrawExperimentButton(TEXT("ScenarioCompare"), TEXT("보정 비교"), X + 86.f + ChoiceW, Y + 28.f, ChoiceW,
+		Settings.Kind == ECombatExperimentKind::RewindComparison, bEnabled);
+	DrawUIText(TEXT("표적"), Muted, X + 8.f, Y + 58.f, 0.80f);
+	DrawExperimentButton(TEXT("TargetStill"), TEXT("정지"), X + 82.f, Y + 55.f, ChoiceW, !Settings.bMovingTarget, bEnabled);
+	DrawExperimentButton(TEXT("TargetMoving"), TEXT("이동"), X + 86.f + ChoiceW, Y + 55.f, ChoiceW, Settings.bMovingTarget, bEnabled);
+	DrawUIText(TEXT("의도적 빗맞힘"), Muted, X + 8.f, Y + 85.f, 0.73f, false, 70.f);
+	const bool bMissEnabled = bEnabled && Settings.Kind == ECombatExperimentKind::RewindComparison;
+	DrawExperimentButton(TEXT("MissOff"), TEXT("끄기"), X + 82.f, Y + 82.f, ChoiceW, !Settings.bIntentionalMisses, bMissEnabled);
+	DrawExperimentButton(TEXT("MissOn"), TEXT("켜기"), X + 86.f + ChoiceW, Y + 82.f, ChoiceW, Settings.bIntentionalMisses, bMissEnabled);
+	const TCHAR* Labels[] = {TEXT("거리"), TEXT("발사 수"), TEXT("반복")};
+	const TCHAR* Minus[] = {TEXT("DistanceMinus"), TEXT("ShotsMinus"), TEXT("RepeatsMinus")};
+	const TCHAR* Plus[] = {TEXT("DistancePlus"), TEXT("ShotsPlus"), TEXT("RepeatsPlus")};
+	const int32 Values[] = {Settings.DistanceMeters, Settings.ShotsPerRun, Settings.Repetitions};
+	const int32 Min[] = {5, 1, 1};
+	const int32 Max[] = {30, 60, 5};
+	const TCHAR* Units[] = {TEXT("m"), TEXT("발 / 구간"), TEXT("회 / 모드")};
+	for (int32 Row = 0; Row < 3; ++Row)
+	{
+		const float RowY = Y + 82.f + (Row + 1) * RowStep;
+		DrawUIText(Labels[Row], Muted, X + 8.f, RowY + 3.f, 0.80f);
+		DrawExperimentButton(FName(Minus[Row]), TEXT("-"), X + 82.f, RowY, 32.f, false, bEnabled && Values[Row] > Min[Row]);
+		DrawUIText(FString::Printf(TEXT("%d %s"), Values[Row], Units[Row]), FLinearColor::White,
+			X + 125.f, RowY + 3.f, 0.80f, false, W - 180.f);
+		DrawExperimentButton(FName(Plus[Row]), TEXT("+"), X + W - 40.f, RowY, 32.f, false, bEnabled && Values[Row] < Max[Row]);
+	}
+	DrawUIText(FString::Printf(TEXT("예정 %d구간 · 총 %d발 | %s"), Settings.PassCount(),
+		Settings.PassCount() * Settings.ShotsPerRun,
+		Settings.Kind == ECombatExperimentKind::Baseline ? TEXT("보정 끄기") : TEXT("끄기/켜기 순서")),
+		Muted, X + 8.f, Y + PlanY, 0.73f);
+	Y += SettingsH + 5.f;
+	DrawRect(Background, X, Y, W, bCompact ? 99.f : 117.f);
+	const float Half = (W - 20.f) * 0.5f;
+	DrawExperimentButton(TEXT("StartScenario"), TEXT("실험 시작"), X + 8.f, Y + 4.f, Half, false, bEnabled);
+	DrawExperimentButton(TEXT("StopScenario"), TEXT("중지"), X + 12.f + Half, Y + 4.f, Half, false,
+		bBusy && GS->ScenarioRunner->GetState().Stage != ECombatScenarioStage::Stopping);
+	DrawUIText(GS->ScenarioRunner->GetProgressLabel(), Cyan, X + 8.f, Y + 32.f, 0.77f);
+	const FCombatScenarioRun& Run = GS->ScenarioRunner->GetState();
+	DrawUIText(FString::Printf(TEXT("끄기 명중 %d/%d · 켜기 명중 %d/%d"), Run.Off.Hits, Run.Off.Shots, Run.On.Hits, Run.On.Shots),
+		Muted, X + 8.f, Y + 55.f, 0.76f);
+	FString Notice = bBusy ? TEXT("진행 중에는 중지 후 조건을 변경해 주세요.") :
+		TEXT("1 커서 · 두 플레이어 임시 배치 / 종료 후 복구");
+	if (PC && !PC->GetExperimentNotice().IsEmpty()) { Notice = PC->GetExperimentNotice(); }
+	else if (!Run.Notice.IsEmpty()) { Notice = Run.Notice; }
+	DrawUIText(Notice, Muted, X + 8.f, Y + 78.f, 0.70f);
+	if (!bCompact)
+	{
+		DrawUIText(TEXT("F6 보정 · F7 지연 · F8 통계 초기화"), Muted, X + 8.f, Y + 98.f, 0.70f);
+	}
 }
 
 void ACombatHUD::DrawNetGraphBox(const UCombatTelemetryComponent* Telemetry, float X, float Y, float W, float H)

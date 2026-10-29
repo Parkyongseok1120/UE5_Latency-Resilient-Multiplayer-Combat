@@ -23,6 +23,8 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CombatTelemetryComponent.h"
 #include "Components/CombatTimeSyncComponent.h"
+#include "Components/CombatScenarioComponent.h"
+#include "CombatHUD.h"
 #include "Engine/NetDriver.h"
 #include "Components/CombatFeedbackComponent.h"
 #include "Components/CharacterPresentationComponent.h"
@@ -46,6 +48,7 @@ void UCombatBenchmarkComponent::BeginPlay()
 			FParse::Param(FCommandLine::Get(), TEXT("FPSLiveExperimentCheck"))))
 	{
 		bLiveExperimentCheck = FParse::Param(FCommandLine::Get(), TEXT("FPSLiveExperimentCheck"));
+		bScenarioCheck = FParse::Param(FCommandLine::Get(), TEXT("FPSScenarioCheck"));
 		bShooter = FParse::Param(FCommandLine::Get(), TEXT("FPSBaselineShooter"));
 		bPresentationCheck = FParse::Param(FCommandLine::Get(), TEXT("FPSPresentationCheck"));
 		bAimIKCheck = FParse::Param(FCommandLine::Get(), TEXT("FPSAimIKCheck"));
@@ -82,6 +85,11 @@ void UCombatBenchmarkComponent::TickComponent(
 {
 	Super::TickComponent(DeltaTime, TickType, TickFunction);
 #if !UE_BUILD_SHIPPING
+	if (bScenarioCheck)
+	{
+		CheckLiveScenario();
+		return;
+	}
 	if (bLiveExperimentCheck)
 	{
 		CheckLiveExperiment();
@@ -719,6 +727,74 @@ void UCombatBenchmarkComponent::CheckLiveExperiment()
 	{
 		PC->RequestExperiment(Revision % 2 == 1, (Revision / 2) * 50);
 	}
+}
+
+void UCombatBenchmarkComponent::CheckLiveScenario()
+{
+	if (bFinished) { return; }
+	const double Now = FPlatformTime::Seconds();
+	if (Now - StartedAt > 150.0) { Finish(false, TEXT("live scenario timeout")); return; }
+	ACombatPlayerController* PC = Cast<ACombatPlayerController>(GetOwner());
+	ACombatGameState* GS = GetWorld()->GetGameState<ACombatGameState>();
+	if (!PC || !GS || !PC->GetPawn() || !PC->TimeSync->IsReady()) { return; }
+	const FCombatScenarioRun& Run = GS->ScenarioRunner->GetState();
+	if (Run.RunId >= 4 && Run.Stage == ECombatScenarioStage::Complete)
+	{
+		if (LiveConditionFinishedAt == 0.0) { LiveConditionFinishedAt = Now; }
+		if (Now - LiveConditionFinishedAt < (bShooter ? 2.0 : 0.5)) { return; }
+		const bool bValid = Run.Off.Shots == 2 && Run.On.Shots == 0 && !GS->ScenarioRunner->IsBusy();
+		UE_LOG(LogTemp, Display, TEXT("[LiveScenarioCheck] %s %s Runs=4 FinalLagMs=%d"),
+			bShooter ? TEXT("Shooter") : TEXT("Observer"), bValid ? TEXT("PASS") : TEXT("FAIL"), GS->Experiment.PacketLagMs);
+		Finish(bValid, TEXT("live scenario configuration, intentional miss option, repetitions and 500ms delay"));
+		return;
+	}
+	if (GS->PlayerArray.Num() < 2) { return; }
+	if (CapturedScenarioRun != Run.RunId && (Run.RunId == 2 || Run.RunId == 3) && Run.Stage == ECombatScenarioStage::Running &&
+		FParse::Param(FCommandLine::Get(), TEXT("FPSBenchmarkCapture")))
+	{
+		CapturedScenarioRun = Run.RunId;
+		if (!PC->bShowMouseCursor) { PC->ToggleExperimentCursor(); }
+		FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir() /
+			FString::Printf(TEXT("LiveExperiments/Scenario-Miss%s-%s.png"),
+				Run.Settings.bIntentionalMisses ? TEXT("On") : TEXT("Off"), bShooter ? TEXT("Shooter") : TEXT("Observer")), false, false);
+	}
+	if (!bShooter || GS->ScenarioRunner->IsBusy() || PC->IsExperimentRequestPending() || Now - LastCompletedAt < 0.4) { return; }
+	if (Run.Stage == ECombatScenarioStage::Cancelled) { Finish(false, TEXT("scenario cancelled unexpectedly")); return; }
+	const uint32 NextRun = Run.RunId + 1;
+	if (NextRun > 4 || ScenarioRequestedRun == NextRun) { return; }
+	LastCompletedAt = Now;
+	FCombatScenarioSettings Settings;
+	const bool bComparison = NextRun == 2 || NextRun == 3;
+	Settings.Kind = bComparison ? ECombatExperimentKind::RewindComparison : ECombatExperimentKind::Baseline;
+	Settings.bMovingTarget = bComparison;
+	Settings.bIntentionalMisses = NextRun == 3;
+	Settings.DistanceMeters = NextRun == 1 ? 10 : bComparison ? 18 : 25;
+	Settings.ShotsPerRun = NextRun == 1 ? 3 : bComparison ? 4 : 2;
+	Settings.Repetitions = NextRun == 1 ? 2 : 1;
+	const int32 Lag = NextRun == 1 ? 100 : bComparison ? 150 : 500;
+	if (GS->Experiment.PacketLagMs != Lag) { PC->RequestExperiment(false, Lag); return; }
+	const FCombatScenarioSettings& Current = GS->Experiment.Scenario;
+	if (Current.Kind != Settings.Kind || Current.bMovingTarget != Settings.bMovingTarget ||
+		Current.DistanceMeters != Settings.DistanceMeters || Current.ShotsPerRun != Settings.ShotsPerRun ||
+		Current.Repetitions != Settings.Repetitions || Current.bIntentionalMisses != Settings.bIntentionalMisses)
+	{
+		PC->RequestScenario(Settings);
+		return;
+	}
+	if (Run.RunId > 0)
+	{
+		const bool bExpected = Run.RunId == 1 ? Run.Off.Shots == 6 && Run.On.Shots == 0 : Run.Off.Shots == 4 && Run.On.Shots == 4;
+		if (!bExpected) { Finish(false, TEXT("scenario repetition or policy totals mismatch")); return; }
+	}
+	if (!PC->bShowMouseCursor) { PC->ToggleExperimentCursor(); return; }
+	ACombatHUD* HUD = Cast<ACombatHUD>(PC->GetHUD());
+	if (HUD && !HUD->CanInteractWithExperimentPanel()) { return; }
+	if (HUD && Run.RunId == 0)
+	{
+		HUD->NotifyHitBoxClick(TEXT("ScenarioTab"));
+	}
+	ScenarioRequestedRun = NextRun;
+	PC->RequestScenarioRunning(true);
 }
 
 void UCombatBenchmarkComponent::BindCharacter(ACombatCharacter* Character)

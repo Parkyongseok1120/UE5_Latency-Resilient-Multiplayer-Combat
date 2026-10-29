@@ -106,3 +106,17 @@ void UWeaponAmmoComponent::CancelReload()
 	}
 	bIsReloading = false;
 }
+
+void UWeaponAmmoComponent::RestoreExperimentAmmo(int32 Magazine, int32 Reserve)
+{
+	const ACombatWeapon* Weapon = Cast<ACombatWeapon>(GetOwner());
+	if (!Weapon || !Weapon->HasAuthority())
+	{
+		return;
+	}
+	CancelReload();
+	MagazineAmmo = FMath::Clamp(Magazine, 0, Weapon->GetStats().MagazineSize);
+	ReserveAmmo = FMath::Clamp(Reserve, 0, Weapon->GetStats().ReserveAmmo);
+	OnReloadChanged.Broadcast();
+	GetOwner()->ForceNetUpdate();
+}

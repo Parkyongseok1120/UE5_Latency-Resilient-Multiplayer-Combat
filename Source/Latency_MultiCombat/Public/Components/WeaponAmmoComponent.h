@@ -18,6 +18,7 @@ public:
 	void StartReload();
 	void FinishReload();
 	void CancelReload();
+	void RestoreExperimentAmmo(int32 Magazine, int32 Reserve);
 	UFUNCTION(BlueprintPure, Category = "Ammo")
 	int32 GetMagazineAmmo() const { return MagazineAmmo; }
 	UFUNCTION(BlueprintPure, Category = "Ammo")

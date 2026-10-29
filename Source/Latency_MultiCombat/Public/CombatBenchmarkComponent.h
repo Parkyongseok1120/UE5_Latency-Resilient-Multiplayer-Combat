@@ -33,6 +33,10 @@ private:
 	void CheckPresentation(ACombatCharacter* Character, ACombatCharacter* Peer);
 	void CheckAimIK(ACombatCharacter* Character, ACombatCharacter* Peer);
 	void CheckLiveExperiment();
+	void CheckLiveScenario();
+	bool bScenarioCheck = false;
+	uint32 ScenarioRequestedRun = 0;
+	uint32 CapturedScenarioRun = 0;
 	void CaptureHUDSlide(ACombatPlayerController* PC, double Elapsed);
 	void CheckCombatFeedback(ACombatCharacter* Character, ACombatCharacter* Peer);
 	void CheckMovingPresentation(ACombatCharacter* Character, ACombatCharacter* Peer);

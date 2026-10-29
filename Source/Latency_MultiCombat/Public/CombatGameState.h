@@ -10,6 +10,7 @@
 
 class ACombatPlayerState;
 class URewindBenchmarkComponent;
+class UCombatScenarioComponent;
 
 UCLASS()
 class LATENCY_MULTICOMBAT_API ACombatGameState : public AGameStateBase
@@ -20,12 +21,15 @@ public:
 	ACombatGameState();
 	UPROPERTY(VisibleAnywhere, Category = "Testing")
 	TObjectPtr<URewindBenchmarkComponent> RewindBenchmark;
+	UPROPERTY(VisibleAnywhere, Category = "Testing")
+	TObjectPtr<UCombatScenarioComponent> ScenarioRunner;
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Network")
 	FLagCompensationSettings LagCompensation;
 	UPROPERTY(ReplicatedUsing = OnRep_Experiment)
 	FCombatExperimentState Experiment;
 	void InitializeExperiment();
 	bool SetExperiment(bool bRewindEnabled, int32 PacketLagMs, uint32 ExpectedRevision);
+	bool SetScenario(const FCombatScenarioSettings& Settings, uint32 ExpectedRevision);
 	static bool SupportsLiveExperiments();
 
 	// Team scores (total kills per team)

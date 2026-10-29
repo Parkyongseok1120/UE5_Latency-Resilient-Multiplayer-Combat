@@ -1,11 +1,12 @@
 param(
-    [ValidateSet(0, 50, 100, 150, 200)][int]$LatencyMs = 0,
+    [ValidateRange(0, 1000)][int]$LatencyMs = 0,
     [string]$EngineRoot = 'C:\Program Files\Epic Games\UE_5.7',
     [ValidateRange(1024, 65535)][int]$Port = 18777,
     [switch]$SmokeTest,
     [switch]$Benchmark,
     [switch]$RewindBenchmark,
     [switch]$LiveExperimentCheck,
+    [switch]$ScenarioCheck,
     [switch]$CombatFeedbackCheck,
     [switch]$MovingAimCheck,
     [switch]$FireModeCheck,
@@ -17,6 +18,8 @@ param(
     [switch]$ShowWindows
 )
 $ErrorActionPreference = 'Stop'
+if ($LatencyMs % 50 -ne 0) { throw 'LatencyMs must use 50ms steps.' }
+if ($ScenarioCheck) { $LiveExperimentCheck = $true }
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $projectFile = Join-Path $projectRoot 'Latency_MultiCombat.uproject'
 $editor = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor.exe'
@@ -30,7 +33,7 @@ if ($MovingAimCheck -and !$Benchmark) { throw 'MovingAimCheck requires Benchmark
 if ($FireModeCheck -and !$Benchmark) { throw 'FireModeCheck requires Benchmark.' }
 if ($RewindBenchmark -and $Samples -gt 24) { throw 'RewindBenchmark supports 8 through 24 samples.' }
 if ($CaptureFrames -and !$Benchmark -and !$RewindBenchmark -and !$LiveExperimentCheck) { throw 'CaptureFrames requires a benchmark.' }
-$mode = if ($LiveExperimentCheck) { 'live-experiment' } elseif ($RewindBenchmark) { 'rewind' } elseif ($Benchmark) { 'benchmark' } elseif ($SmokeTest) { 'smoke' } else { 'play' }
+$mode = if ($ScenarioCheck) { 'scenario' } elseif ($LiveExperimentCheck) { 'live-experiment' } elseif ($RewindBenchmark) { 'rewind' } elseif ($Benchmark) { 'benchmark' } elseif ($SmokeTest) { 'smoke' } else { 'play' }
 $runName = '{0}-{1}ms-{2}' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'), $LatencyMs, $mode
 $logDirectory = Join-Path $projectRoot "Saved\FPSBaseline\$runName"
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
@@ -61,6 +64,7 @@ try {
     if ($Benchmark) { $clientArgs += @('-FPSBaselineBenchmark', "-FPSBenchmarkSamples=$Samples") }
     if ($RewindBenchmark) { $clientArgs += @('-FPSRewindBenchmark', "-FPSBenchmarkSamples=$Samples") }
     if ($LiveExperimentCheck) { $clientArgs += '-FPSLiveExperimentCheck' }
+    if ($ScenarioCheck) { $clientArgs += '-FPSScenarioCheck' }
     if ($CombatFeedbackCheck) { $clientArgs += '-FPSCombatFeedbackCheck' }
     if ($MovingAimCheck) { $clientArgs += '-FPSMovingAimCheck' }
     if ($FireModeCheck) { $clientArgs += '-FPSFireModeCheck' }

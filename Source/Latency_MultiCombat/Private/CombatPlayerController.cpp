@@ -2,6 +2,7 @@
 #include "Components/CombatTelemetryComponent.h"
 #include "Components/CombatFeedbackComponent.h"
 #include "Components/CombatTimeSyncComponent.h"
+#include "Components/CombatScenarioComponent.h"
 #include "CombatBenchmarkComponent.h"
 #include "Components/CombatSmokeComponent.h"
 #include "CombatGameState.h"
@@ -58,7 +59,7 @@ void ACombatPlayerController::RequestExperiment(bool bRewindEnabled, int32 Packe
 {
 	const ACombatGameState* State = GetWorld()->GetGameState<ACombatGameState>();
 	if (!IsLocalController() || !State || !ACombatGameState::SupportsLiveExperiments() ||
-		IsExperimentRequestPending() || !FCombatExperimentState::IsValidLag(PacketLagMs))
+		IsExperimentRequestPending() || State->ScenarioRunner->IsBusy() || !FCombatExperimentState::IsValidLag(PacketLagMs))
 	{
 		return;
 	}
@@ -72,7 +73,8 @@ void ACombatPlayerController::ServerSetExperiment_Implementation(
 	bool bRewindEnabled, int32 PacketLagMs, uint32 ExpectedRevision)
 {
 	ACombatGameState* State = GetWorld()->GetGameState<ACombatGameState>();
-	ClientExperimentRequestResult(State && State->SetExperiment(bRewindEnabled, PacketLagMs, ExpectedRevision));
+	ClientExperimentRequestResult(State && !State->ScenarioRunner->IsBusy() &&
+		State->SetExperiment(bRewindEnabled, PacketLagMs, ExpectedRevision));
 }
 
 void ACombatPlayerController::ClientExperimentRequestResult_Implementation(bool bAccepted)
@@ -150,8 +152,80 @@ void ACombatPlayerController::CycleExperimentLag()
 {
 	if (const ACombatGameState* State = GetWorld()->GetGameState<ACombatGameState>())
 	{
-		RequestExperiment(State->LagCompensation.bEnabled, ((State->Experiment.PacketLagMs / 50 + 1) % 5) * 50);
+		const int32 Lag = State->Experiment.PacketLagMs;
+		const int32 Next = Lag < 200 ? (Lag / 50 + 1) * 50 : Lag < 500 ? 500 : 0;
+		RequestExperiment(State->LagCompensation.bEnabled, Next);
 	}
+}
+
+void ACombatPlayerController::RequestScenario(const FCombatScenarioSettings& Settings)
+{
+	const ACombatGameState* State = GetWorld()->GetGameState<ACombatGameState>();
+	if (!IsLocalController() || !State || !ACombatGameState::SupportsLiveExperiments() ||
+		IsExperimentRequestPending() || State->ScenarioRunner->IsBusy() || !Settings.IsValid())
+	{
+		return;
+	}
+	ExperimentNotice.Reset();
+	bExperimentRequestPending = true;
+	RequestedExperimentRevision = State->Experiment.Revision + 1;
+	ServerSetScenario(Settings, State->Experiment.Revision);
+}
+
+void ACombatPlayerController::ServerSetScenario_Implementation(FCombatScenarioSettings Settings, uint32 ExpectedRevision)
+{
+	ACombatGameState* State = GetWorld()->GetGameState<ACombatGameState>();
+	ClientExperimentRequestResult(State && State->SetScenario(Settings, ExpectedRevision));
+}
+
+void ACombatPlayerController::RequestScenarioRunning(bool bStart)
+{
+	const ACombatGameState* State = GetWorld()->GetGameState<ACombatGameState>();
+	if (IsLocalController() && State && !IsExperimentRequestPending())
+	{
+		ExperimentNotice.Reset();
+		ServerSetScenarioRunning(bStart, State->Experiment.Revision, State->ScenarioRunner->GetState().RunId);
+	}
+}
+
+void ACombatPlayerController::ServerSetScenarioRunning_Implementation(
+	bool bStart, uint32 ExpectedRevision, uint32 ExpectedRunId)
+{
+	ACombatGameState* State = GetWorld()->GetGameState<ACombatGameState>();
+	if (!State || !ACombatGameState::SupportsLiveExperiments() || (bStart && ExpectedRevision != State->Experiment.Revision) ||
+		ExpectedRunId != State->ScenarioRunner->GetState().RunId)
+	{
+		ClientScenarioNotice(TEXT("조건이 변경됐습니다. 다시 선택해 주세요."));
+		return;
+	}
+	if (bStart)
+	{
+		ClientScenarioNotice(State->ScenarioRunner->Start(this));
+	}
+	else
+	{
+		State->ScenarioRunner->Stop(TEXT("사용자 중지"));
+	}
+}
+
+void ACombatPlayerController::ServerScenarioSample_Implementation(
+	uint32 RunId, int32 Pass, int32 SampleIndex, FCombatShotResponse Response, float AckMs)
+{
+	if (ACombatGameState* State = GetWorld()->GetGameState<ACombatGameState>())
+	{
+		State->ScenarioRunner->AcceptSample(this, RunId, Pass, SampleIndex, Response, AckMs);
+	}
+}
+
+void ACombatPlayerController::ClientScenarioNotice_Implementation(const FString& Notice)
+{
+	ExperimentNotice = Notice;
+}
+
+bool ACombatPlayerController::IsScenarioParticipant() const
+{
+	const ACombatGameState* State = GetWorld()->GetGameState<ACombatGameState>();
+	return State && State->ScenarioRunner->IsParticipant(this);
 }
 
 void ACombatPlayerController::ResetExperimentMetrics()

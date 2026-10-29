@@ -33,6 +33,7 @@ private:
 	void ReleaseBindings();
 	ACombatCharacter* GetCharacter() const;
 	ACombatWeapon* GetWeapon() const;
+	bool IsScenarioInputBlocked() const;
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
 	void JumpStarted();

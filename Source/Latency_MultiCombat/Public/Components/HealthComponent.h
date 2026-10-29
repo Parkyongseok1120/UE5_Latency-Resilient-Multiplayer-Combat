@@ -19,6 +19,8 @@ public:
 	void Heal(float Amount);
 	void ResetForRespawn();
 	void MarkDead();
+	// 실험에서 임시 체력을 사용한 뒤 기존 생존 상태로 복구한다. 사망한 플레이어를 되살리지는 않는다.
+	void RestoreExperimentVitals(const FCharacterStats& Stats, float Health, float Armor);
 	UFUNCTION(BlueprintPure, Category = "Health")
 	float GetHealth() const { return CurrentHealth; }
 	UFUNCTION(BlueprintPure, Category = "Health")

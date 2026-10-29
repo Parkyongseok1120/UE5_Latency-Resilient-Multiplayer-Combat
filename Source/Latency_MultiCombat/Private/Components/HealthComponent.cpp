@@ -80,3 +80,18 @@ void UHealthComponent::Heal(float Amount)
 	CurrentHealth = FMath::Min(MaxHealth, CurrentHealth + Amount);
 	GetOwner()->ForceNetUpdate();
 }
+
+void UHealthComponent::RestoreExperimentVitals(const FCharacterStats& Stats, float Health, float Armor)
+{
+	if (!GetOwner()->HasAuthority() || bIsDead || !FMath::IsFinite(Health) || !FMath::IsFinite(Armor))
+	{
+		return;
+	}
+	const FCharacterStats Resolved = FCombatRules::NormalizeCharacterStats(Stats);
+	MaxHealth = Resolved.MaxHealth;
+	SpawnArmor = Resolved.MaxArmor;
+	ArmorAbsorptionRatio = Resolved.ArmorAbsorptionRatio;
+	CurrentHealth = FMath::Clamp(Health, 1.f, MaxHealth);
+	CurrentArmor = FMath::Clamp(Armor, 0.f, SpawnArmor);
+	GetOwner()->ForceNetUpdate();
+}

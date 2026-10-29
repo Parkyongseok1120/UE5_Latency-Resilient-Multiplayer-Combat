@@ -1,6 +1,7 @@
 #include "Components/CombatInputComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "CombatCharacter.h"
+#include "CombatPlayerController.h"
 #include "CombatWeapon.h"
 #include "Components/WeaponFireComponent.h"
 #include "Components/WeaponAmmoComponent.h"
@@ -91,6 +92,13 @@ ACombatWeapon* UCombatInputComponent::GetWeapon() const
 	return Character ? Character->GetWeapon() : nullptr;
 }
 
+bool UCombatInputComponent::IsScenarioInputBlocked() const
+{
+	const ACombatCharacter* Character = GetCharacter();
+	const ACombatPlayerController* PC = Character ? Cast<ACombatPlayerController>(Character->GetController()) : nullptr;
+	return PC && PC->IsScenarioParticipant();
+}
+
 void UCombatInputComponent::Move(const FInputActionValue& Value)
 {
 	ACombatCharacter* Character = GetCharacter();
@@ -114,6 +122,7 @@ void UCombatInputComponent::Look(const FInputActionValue& Value)
 }
 void UCombatInputComponent::JumpStarted()
 {
+	if (IsScenarioInputBlocked()) { return; }
 	if (ACombatCharacter* Character = GetCharacter(); Character && Character->GetCombatState() != ECombatState::Dead)
 	{
 		Character->Jump();
@@ -129,7 +138,7 @@ void UCombatInputComponent::JumpEnded()
 void UCombatInputComponent::FireStarted()
 {
 	const APlayerController* PC = GetCharacter() ? Cast<APlayerController>(GetCharacter()->GetController()) : nullptr;
-	if (PC && PC->bShowMouseCursor)
+	if (IsScenarioInputBlocked() || (PC && PC->bShowMouseCursor))
 	{
 		return;
 	}
@@ -147,6 +156,7 @@ void UCombatInputComponent::FireEnded()
 }
 void UCombatInputComponent::ReloadStarted()
 {
+	if (IsScenarioInputBlocked()) { return; }
 	if (ACombatWeapon* Weapon = GetWeapon())
 	{
 		Weapon->Ammo->StartReload();
@@ -156,7 +166,7 @@ void UCombatInputComponent::FireModeStarted()
 {
 	const ACombatCharacter* Character = GetCharacter();
 	const APlayerController* PC = Character ? Cast<APlayerController>(Character->GetController()) : nullptr;
-	if (PC && !PC->bShowMouseCursor)
+	if (PC && !PC->bShowMouseCursor && !IsScenarioInputBlocked())
 	{
 		if (ACombatWeapon* Weapon = GetWeapon())
 		{
@@ -167,7 +177,7 @@ void UCombatInputComponent::FireModeStarted()
 void UCombatInputComponent::ADSStarted()
 {
 	const APlayerController* PC = GetCharacter() ? Cast<APlayerController>(GetCharacter()->GetController()) : nullptr;
-	if (PC && PC->bShowMouseCursor)
+	if (IsScenarioInputBlocked() || (PC && PC->bShowMouseCursor))
 	{
 		return;
 	}

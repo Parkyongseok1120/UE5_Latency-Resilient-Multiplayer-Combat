@@ -28,7 +28,7 @@ bool FCombatDefaultInputTest::RunTest(const FString& Parameters)
 		{EKeys::D, Data->Move, FVector2D(1.f, 0.f)},
 		{EKeys::A, Data->Move, FVector2D(-1.f, 0.f)},
 		{EKeys::MouseX, Data->Look, FVector2D(0.07f, 0.f)},
-		{EKeys::MouseY, Data->Look, FVector2D(0.f, -0.07f)},
+		{EKeys::MouseY, Data->Look, FVector2D(0.f, 0.07f)},
 	};
 	for (const FExpectedAxis& Axis : Expected)
 	{
@@ -40,17 +40,21 @@ bool FCombatDefaultInputTest::RunTest(const FString& Parameters)
 				continue;
 			}
 			bFound = true;
-			FInputActionValue Value(FVector2D(1.f, 0.f));
-			for (const UInputModifier* Modifier : Mapping.Modifiers)
+			for (const float Direction : {1.f, -1.f})
 			{
-				Value = Modifier->ModifyRaw(nullptr, Value, 0.016f);
+				FInputActionValue Value(FVector2D(Direction, 0.f));
+				for (const UInputModifier* Modifier : Mapping.Modifiers)
+				{
+					Value = Modifier->ModifyRaw(nullptr, Value, 0.016f);
+				}
+				for (const UInputModifier* Modifier : Axis.Action->Modifiers)
+				{
+					Value = Modifier->ModifyRaw(nullptr, Value, 0.016f);
+				}
+				TestTrue(*FString::Printf(TEXT("%s input %+.0f retains direction and sensitivity"),
+					*Axis.Key.ToString(), Direction),
+					Value.Get<FVector2D>().Equals(Axis.Value * Direction, 0.0001f));
 			}
-			for (const UInputModifier* Modifier : Axis.Action->Modifiers)
-			{
-				Value = Modifier->ModifyRaw(nullptr, Value, 0.016f);
-			}
-			TestTrue(*FString::Printf(TEXT("%s retains direction and sensitivity"), *Axis.Key.ToString()),
-				Value.Get<FVector2D>().Equals(Axis.Value, 0.0001f));
 		}
 		TestTrue(*FString::Printf(TEXT("%s has a mapping"), *Axis.Key.ToString()), bFound);
 	}

@@ -49,7 +49,8 @@ void UCombatInputDataAsset::CreateDefaultMappings()
 	MapAxis(MappingContext, Move, EKeys::D, false, false);
 	MapAxis(MappingContext, Move, EKeys::A, false, true);
 	MapAxis(MappingContext, Look, EKeys::MouseX, false, false);
-	MapAxis(MappingContext, Look, EKeys::MouseY, true, true);
+	// MouseY is positive upward, matching positive controller pitch with legacy input scales disabled.
+	MapAxis(MappingContext, Look, EKeys::MouseY, true, false);
 	MappingContext->MapKey(Jump, EKeys::SpaceBar);
 	MappingContext->MapKey(Fire, EKeys::LeftMouseButton);
 	MappingContext->MapKey(Reload, EKeys::R);
